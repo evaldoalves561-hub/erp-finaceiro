@@ -155,6 +155,7 @@ td.wrap{white-space:normal;min-width:220px}
 .tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 10px;font-weight:600;color:var(--ink-2);cursor:pointer;display:flex;gap:6px;align-items:center}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
 @media (max-width:820px){.audit-head{grid-template-columns:minmax(0,1fr)}.g-tiles.g5{grid-template-columns:repeat(2,minmax(0,1fr))}}
+a.btn{text-decoration:none;display:inline-block}
 [hidden]{display:none!important}
 .auth{min-height:100%;display:grid;place-items:center;padding-block:32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--side)}
 .auth-card{background:var(--surface);border-radius:12px;padding:28px;width:min(400px,100%);display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
@@ -179,7 +180,8 @@ td.wrap{white-space:normal;min-width:220px}
 .checks input{accent-color:var(--accent)}
 .loading{opacity:.55;pointer-events:none}
 .soon{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--side-ink-2);border:1px solid var(--side-hi);border-radius:4px;padding:0 4px}
-@media (max-width:820px){.tile .val{font-size:18px}.form-grid{grid-template-columns:minmax(0,1fr)}.userbox{display:none}}
+.chart-scroll{overflow-x:auto}.form-grid.f4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:820px){.chart-scroll svg{min-width:720px}.form-grid.f4{grid-template-columns:repeat(2,minmax(0,1fr))}.g-tiles[style]{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tile .val{font-size:18px}.form-grid{grid-template-columns:minmax(0,1fr)}.userbox{display:none}}
 </style>
 </head><body>
 
@@ -263,7 +265,7 @@ async function chamarAdmin(body){
 // ===================== estado
 const S={
   user:null,perfil:null,master:false,papeis:{},
-  empresas:[],produtos:[],predios:[],contas:[],centros:[],bancos:[],parceiros:[],
+  empresas:[],produtos:[],impostos:[],acordos:[],apuracoes:null,tribEmp:null,reforma:null,predios:[],contas:[],centros:[],bancos:[],parceiros:[],
   sel:new Set(),ano:+HOJE.slice(0,4),per:{tipo:'ano',v:0},anos:[],
   lanc:{},parcAbertas:null,pagas:{},dreModo:'mes',abertos:new Set(),
   cpLado:'pagar',lancBusca:'',planoEmp:null,imp:null,usuarios:null,
@@ -297,7 +299,7 @@ function labelCurto(a=S.ano,p=S.per){return p.tipo==='ano'?String(a):p.tipo==='t
 
 // ===================== carga de dados
 async function carregarCadastros(){
-  const [emp,pre,ct,cc,bc,pa,ue,pr]=await Promise.all([
+  const [emp,pre,ct,cc,bc,pa,ue,pr,ic,ac]=await Promise.all([
     sb.from('empresas').select('*').order('razao_social'),
     sb.from('predios').select('*').order('nome'),
     todos(()=>sb.from('plano_contas').select('*').order('codigo')),
@@ -306,9 +308,11 @@ async function carregarCadastros(){
     todos(()=>sb.from('parceiros').select('id,empresa_id,documento,nome').order('nome')),
     sb.from('usuarios_empresas').select('empresa_id,papel').eq('usuario_id',S.user.id),
     sb.from('produtos').select('id,empresa_id,codigo,nome'),
+    sb.from('impostos_config').select('*'),
+    sb.from('acordos_cartao').select('*'),
   ]);
-  for(const r of [emp,pre,cc,bc,ue,pr])if(r.error)throw r.error;
-  S.empresas=emp.data;S.predios=pre.data;S.contas=ct;S.centros=cc.data;S.bancos=bc.data;S.parceiros=pa;S.produtos=pr.data;
+  for(const r of [emp,pre,cc,bc,ue,pr,ic,ac])if(r.error)throw r.error;
+  S.empresas=emp.data;S.predios=pre.data;S.contas=ct;S.centros=cc.data;S.bancos=bc.data;S.parceiros=pa;S.produtos=pr.data;S.impostos=ic.data;S.acordos=ac.data;
   S.papeis=Object.fromEntries(ue.data.map(x=>[x.empresa_id,x.papel]));
   const keys=new Set(unidades().map(u=>u.key));
   if(!S.sel.size||[...S.sel].some(k=>!keys.has(k)))S.sel=keys;else unidades().forEach(u=>{if(!S._conhecidas?.has(u.key))S.sel.add(u.key)});
@@ -325,7 +329,7 @@ async function carregarAnos(){
     const ultimo=+b.data[0].competencia.slice(5,7)-1;if(fim===hoje&&ultimo<11){S.per={tipo:'mes',v:ultimo}}}
 }
 async function lancAno(a){
-  if(!S.lanc[a])S.lanc[a]=todos(()=>sb.from('lancamentos').select('id,empresa_id,predio_id,conta_id,centro_custo_id,parceiro_id,competencia,valor,descricao').gte('competencia',a+'-01-01').lte('competencia',a+'-12-31').order('competencia')).catch(e=>{delete S.lanc[a];throw e});
+  if(!S.lanc[a])S.lanc[a]=todos(()=>sb.from('lancamentos').select('id,empresa_id,predio_id,conta_id,centro_custo_id,parceiro_id,competencia,valor,descricao,origem,forma_recebimento,acordo_id,vinculo_id,numero_nf,apuracao_id').gte('competencia',a+'-01-01').lte('competencia',a+'-12-31').order('competencia')).catch(e=>{delete S.lanc[a];throw e});
   return S.lanc[a];
 }
 async function parcelasAbertas(){
@@ -386,7 +390,7 @@ function chartFluxo({labels,ent,sai,acum}){
   const pts=acum.map((v,i)=>v==null?null:[L+i*bw+bw/2,y(v)]).filter(Boolean);
   s+=`<polyline points="${pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
   pts.forEach((p,i)=>s+=`<circle cx="${p[0]}" cy="${p[1]}" r="2.6" fill="var(--accent)"><title>${labels[i]} · acumulado ${brl.format(acum[i])}</title></circle>`);
-  return s+'</svg>';
+  return '<div class="chart-scroll">'+s+'</svg></div>';
 }
 function deltaChip(atual,ant,inverso=false){if(!ant)return'<span class="chip mute">sem base</span>';const d=(atual-ant)/Math.abs(ant);const bom=inverso?d<=0:d>=0;return `<span class="chip ${Math.abs(d)<.01?'mute':bom?'good':'bad'}">${d>=0?'▲':'▼'} ${pct(Math.abs(d))}</span>`}
 function ppDiff(a,b){if(!isFinite(a)||!isFinite(b))return'';const d=(a-b)*100;return `<span class="chip ${Math.abs(d)<.2?'mute':d>0?'good':'bad'}">${d>0?'+':''}${d.toFixed(1).replace('.',',')} p.p.</span>`}
@@ -589,7 +593,7 @@ function formLanc(){
     <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar lançamento</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
 }
 function trocaEmpForm(sel){const f=camposEmpresa(sel.value),fm=sel.form;
-  if(fm.predio)fm.predio.innerHTML=f.pred;if(fm.conta)fm.conta.innerHTML=f.contas;if(fm.centro)fm.centro.innerHTML=f.cc;if(fm.banco)fm.banco.innerHTML=f.bancos;
+  if(fm.predio)fm.predio.innerHTML=f.pred;if(fm.conta)fm.conta.innerHTML=fm.dataset.form==='fat'?S.contas.filter(c=>c.empresa_id===sel.value&&c.analitica&&c.ativa&&c.grupo_dre==='receita_bruta').map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join(''):f.contas;if(fm.centro)fm.centro.innerHTML=f.cc;if(fm.banco)fm.banco.innerHTML=f.bancos;
   const dl=document.getElementById('dlParc');if(dl)dl.innerHTML=S.parceiros.filter(p=>p.empresa_id===sel.value).map(p=>`<option value="${esc(p.nome)}">`).join('');
   if(fm.pai)fm.pai.innerHTML=`<option value="">Nenhuma (conta raiz)</option>${S.contas.filter(c=>c.empresa_id===sel.value&&!c.analitica).map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}`}
 async function abrirLanc(id){
@@ -859,16 +863,366 @@ const EM_BREVE={
 function vEmBreve(r){const [t,txt]=EM_BREVE[r];return vazio(t+' · próxima fase',`<p style="margin:0 auto;max-width:60ch">${txt}</p><p class="muted" style="margin:8px 0 0">O banco de dados já tem as tabelas desta tela. Enquanto ela é construída, veja como vai ficar no protótipo.</p>`,`<a class="btn ghost" href="${PROTOTIPO}" target="_blank" rel="noopener">Ver no protótipo</a>`)}
 </script>
 <script>
+// ===================== Faturamento, maquininha e impostos
+const FORMAS={dinheiro:'Dinheiro',pix:'PIX',boleto:'Boleto',transferencia:'Transferência',debito:'Cartão de débito',credito_vista:'Crédito à vista',credito_parcelado:'Crédito parcelado',voucher:'Voucher'};
+const CARTAO=new Set(['debito','credito_vista','credito_parcelado','voucher','pix']);
+const MODALIDADES={debito:'Débito',credito_vista:'Crédito à vista',credito_parcelado:'Crédito parcelado',pix:'PIX na maquininha',voucher:'Voucher'};
+const REGIMES={simples_nacional:'Simples Nacional',lucro_presumido:'Lucro Presumido',lucro_real:'Lucro Real'};
+const ATIVIDADES={servicos:'Serviços',comercio:'Comércio',locacao:'Locação e administração de imóveis',misto:'Comércio e serviços'};
+// modelos de impostos: [imposto, periodicidade, alíquota %, presunção %, adicional %, limite adicional, dia, conta]
+function modeloImpostos(regime,ativ){
+  const ir=p=>[['IRPJ','trimestral',15,p[0],10,60000,31,'7.01.001'],['CSLL','trimestral',9,p[1],null,null,31,'7.01.002']];
+  if(regime==='simples_nacional')return [['DAS','mensal',6,null,null,null,20,'3.02.001']];
+  if(regime==='lucro_real')return [['PIS','mensal',1.65,null,null,null,25,'3.02.003'],['COFINS','mensal',7.6,null,null,null,25,'3.02.003'],...(ativ==='comercio'||ativ==='misto'?[['ICMS','mensal',4,null,null,null,20,'3.02.005']]:[]),...(ativ==='servicos'||ativ==='misto'?[['ISS','mensal',5,null,null,null,15,'3.02.004']]:[]),['IRPJ','trimestral',15,null,10,60000,31,'7.01.001'],['CSLL','trimestral',9,null,null,null,31,'7.01.002']];
+  const pc=[['PIS','mensal',.65,null,null,null,25,'3.02.003'],['COFINS','mensal',3,null,null,null,25,'3.02.003']];
+  if(ativ==='comercio')return [...pc,['ICMS','mensal',4,null,null,null,20,'3.02.005'],...ir([8,12])];
+  if(ativ==='locacao')return [...pc,...ir([32,32])];
+  if(ativ==='misto')return [...pc,['ISS','mensal',5,null,null,null,15,'3.02.004'],['ICMS','mensal',4,null,null,null,20,'3.02.005'],...ir([8,12])];
+  return [...pc,['ISS','mensal',5,null,null,null,15,'3.02.004'],...ir([32,32])];
+}
+const contaCod=(emp,cod)=>S.contas.find(c=>c.empresa_id===emp&&c.codigo===cod);
+const grupoDe=l=>conta(l.conta_id)?.grupo_dre;
+const ehFat=l=>grupoDe(l)==='receita_bruta';
+function vencDia(ano,mes0,dia){const ult=new Date(Date.UTC(ano,mes0+1,0)).getUTCDate();const d=new Date(Date.UTC(ano,mes0,Math.min(dia,ult)));while([0,6].includes(d.getUTCDay()))d.setUTCDate(d.getUTCDate()-1);return d.toISOString().slice(0,10)}
+const fimMes=(a,m)=>new Date(Date.UTC(a,m+1,0)).toISOString().slice(0,10);
+const configsDe=(emp,ini)=>S.impostos.filter(c=>c.empresa_id===emp&&c.vigencia_inicio<=ini&&(!c.vigencia_fim||c.vigencia_fim>=ini));
+// Apuração calculada de uma empresa (CNPJ inteiro) num ano; cada linha traz a distribuição do valor pelos meses
+function apurarEmpresa(e,lsEmp,ano){
+  const fat=Array(12).fill(0);lsEmp.forEach(l=>{if(ehFat(l))fat[+l.competencia.slice(5,7)-1]+=+l.valor});
+  const out=[];const ini0=ano+'-01-01';
+  for(const c of S.impostos.filter(c=>c.empresa_id===e.id)){
+    const per=c.periodicidade==='trimestral'?[0,1,2,3].map(q=>[3*q,3*q+2]):[...Array(12).keys()].map(m=>[m,m]);
+    for(const [m0,m1] of per){
+      const ini=ym(ano,m0)+'-01';if(!configsDe(e.id,ini).includes(c))continue;
+      const fatP=sum(fat.slice(m0,m1+1));let base,valor;
+      if(c.presuncao!=null||!['IRPJ','CSLL'].includes(c.imposto)){base=fatP*(c.presuncao!=null?c.presuncao/100:1)}
+      else{const ms=new Set([...Array(m1-m0+1).keys()].map(i=>ym(ano,m0+i)));base=Math.max(0,dre(lsEmp.filter(l=>ms.has(l.competencia.slice(0,7)))).lair)}
+      if(!fatP&&!base)continue;
+      valor=base*c.aliquota/100+(c.adicional_aliquota?Math.max(0,base-(+c.adicional_limite||0))*c.adicional_aliquota/100:0);
+      const pm=new Date(Date.UTC(ano,m1+1,1));
+      const venc=vencDia(pm.getUTCFullYear(),pm.getUTCMonth(),c.dia_vencimento);
+      const dist=Array(12).fill(0);for(let m=m0;m<=m1;m++)dist[m]=fatP?valor*fat[m]/fatP:valor/(m1-m0+1);
+      const ap=S.apuracoes.find(a=>a.empresa_id===e.id&&a.imposto===c.imposto&&a.periodo_inicio===ini);
+      out.push({emp:e,cfg:c,imposto:c.imposto,trimestral:c.periodicidade==='trimestral',ini,fim:fimMes(ano,m1),m0,m1,fat:fatP,base,valor:r2(valor),venc,dist,ap,sobreLucro:['IRPJ','CSLL'].includes(c.imposto)});
+    }
+  }
+  return {rows:out,fat};
+}
+async function carregarApuracoes(){const {data,error}=await sb.from('apuracoes').select('*');if(error)throw error;S.apuracoes=data}
+async function dadosFat(ano){
+  const [ls,lsAnt]=await Promise.all([lancAno(ano),lancAno(ano-1)]);
+  if(!S.apuracoes)await carregarApuracoes();
+  const emp={};
+  for(const e of selEmp()){
+    const a=apurarEmpresa(e,ls.filter(l=>l.empresa_id===e.id),ano),b=apurarEmpresa(e,lsAnt.filter(l=>l.empresa_id===e.id),ano-1);
+    const fatSel=Array(12).fill(0);ls.forEach(l=>{if(l.empresa_id===e.id&&ehFat(l)&&naSel(l.empresa_id,l.predio_id))fatSel[+l.competencia.slice(5,7)-1]+=+l.valor});
+    const share=a.fat.map((f,m)=>f?fatSel[m]/f:0);
+    emp[e.id]={e,rows:a.rows,rowsAnt:b.rows,fat:a.fat,fatSel,share};
+  }
+  return {ls,emp};
+}
+// valor de impostos por mês na seleção (rateado pela participação dos prédios marcados no faturamento da empresa)
+function impostosMes(D,filtro){const out=Array(12).fill(0);Object.values(D.emp).forEach(x=>x.rows.filter(filtro).forEach(r=>r.dist.forEach((v,m)=>out[m]+=v*x.share[m])));return out}
+
+function chartStack({labels,series,hi,total}){
+  const W=1100,H=280,L=64,R_=12,T=14,B=28,iw=W-L-R_,ih=H-T-B;
+  const tot=labels.map((_,i)=>sum(series.map(s=>Math.max(0,s.vals[i]))));const max=(Math.max(1,...tot,...(total||[])))*1.08;
+  const n=labels.length,bw=iw/n,y=v=>T+ih-(v/max)*ih,step=niceStep(max/4);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Composição do faturamento por mês">`;
+  for(let t=0;t<=max;t+=step)s+=`<line x1="${L}" x2="${W-R_}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${k(t).replace('R$ ','')}</text>`;
+  labels.forEach((l,i)=>{let acc=0;const x=L+i*bw+bw*.2,w=bw*.6;
+    series.forEach(se=>{const v=Math.max(0,se.vals[i]);if(!v)return;s+=`<rect x="${x}" y="${y(acc+v)}" width="${w}" height="${Math.max(0,y(acc)-y(acc+v)-1)}" fill="${se.cor}" opacity="${hi.has(i)?1:.45}"><title>${l} · ${esc(se.nome)}: ${brl.format(v)}</title></rect>`;acc+=v});
+    s+=`<text x="${L+i*bw+bw/2}" y="${H-8}" text-anchor="middle" font-size="11" fill="${hi.has(i)?'var(--ink)':'var(--ink-3)'}" font-weight="${hi.has(i)?600:400}">${l}</text>`});
+  return '<div class="chart-scroll">'+s+'</svg></div>';
+}
+function chartAnos({labels,atual,novo}){
+  const W=1100,H=260,L=64,R_=12,T=14,B=28,iw=W-L-R_,ih=H-T-B;const max=Math.max(1,...atual,...novo)*1.1;const n=labels.length,bw=iw/n,y=v=>T+ih-(v/max)*ih,step=niceStep(max/4);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Impostos sobre o faturamento: hoje e com a reforma, por ano">`;
+  for(let t=0;t<=max;t+=step)s+=`<line x1="${L}" x2="${W-R_}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${k(t).replace('R$ ','')}</text>`;
+  labels.forEach((l,i)=>{const x=L+i*bw+bw*.18,w=bw*.3;
+    s+=`<rect x="${x}" y="${y(atual[i])}" width="${w}" height="${y(0)-y(atual[i])}" rx="2" fill="var(--plan)"><title>${l} · regras de hoje: ${brl.format(atual[i])}</title></rect>`;
+    s+=`<rect x="${x+w+2}" y="${y(novo[i])}" width="${w}" height="${y(0)-y(novo[i])}" rx="2" fill="${novo[i]>atual[i]*1.005?'var(--bad)':novo[i]<atual[i]*.995?'var(--good)':'var(--accent)'}"><title>${l} · com a reforma: ${brl.format(novo[i])}</title></rect>`;
+    s+=`<text x="${L+i*bw+bw/2}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--ink-2)">${l}</text>`});
+  return '<div class="chart-scroll">'+s+'</svg></div>';
+}
+
+async function vFaturamento(){
+  const D=await dadosFat(S.ano);const ms=mesesDoPer();const MS=new Set(ms);const idx=ms.map(m=>+m.slice(5)-1);
+  const ant=perAnterior();const Dant=ant.a===S.ano?D:await dadosFat(ant.a);
+  const lsP=D.ls.filter(l=>MS.has(l.competencia.slice(0,7))&&naSel(l.empresa_id,l.predio_id));
+  const fatL=lsP.filter(ehFat),taxL=lsP.filter(l=>l.origem==='taxa_cartao');
+  const bruto=sum(fatL.map(l=>l.valor));
+  const brutoAnt=sum(Dant.ls.filter(l=>new Set(mesesDoPer(ant.a,ant.p)).has(l.competencia.slice(0,7))&&naSel(l.empresa_id,l.predio_id)&&ehFat(l)).map(l=>l.valor));
+  const taxas=-sum(taxL.map(l=>l.valor));
+  const impM=impostosMes(D,r=>!r.sobreLucro),irM=impostosMes(D,r=>r.sobreLucro);
+  const imp=sum(idx.map(m=>impM[m])),ir=sum(idx.map(m=>irM[m]));
+  const liq=bruto-taxas-imp-ir;
+  const semConfig=selEmp().filter(e=>!S.impostos.some(c=>c.empresa_id===e.id));
+  const aviso=semConfig.length?`<div class="panel" style="border-color:var(--warn)"><b>Configure os impostos de ${semConfig.map(e=>esc(nomeEmp(e))).join(', ')}</b><p class="hint" style="margin:4px 0 0">Sem o regime tributário o sistema não calcula os impostos dessa empresa. ${podeEditarAlguma()?'<a href="#tributos">Configurar agora</a>':''}</p></div>`:'';
+  if(!bruto&&!fatL.length)return aviso+vazio('Nenhum faturamento em '+labelPer(),'<p style="margin:0">O faturamento vem dos lançamentos em contas de receita bruta (pela data de emissão da NF). Registre uma venda ou importe dados antigos.</p>',podeEditarAlguma()?'<button class="btn" data-acao="novo-fat">Registrar faturamento</button>':'');
+  // série mensal do ano
+  const fatAno=Array(12).fill(0),taxAno=Array(12).fill(0);D.ls.filter(l=>naSel(l.empresa_id,l.predio_id)).forEach(l=>{const m=+l.competencia.slice(5,7)-1;if(ehFat(l))fatAno[m]+=+l.valor;if(l.origem==='taxa_cartao')taxAno[m]-=+l.valor});
+  const liqAno=fatAno.map((f,m)=>f-taxAno[m]-impM[m]-irM[m]);
+  // por forma
+  const porForma={};fatL.forEach(l=>{const f=l.forma_recebimento||'nao_informado';const o=porForma[f]=porForma[f]||{n:0,v:0,t:0};o.n++;o.v+= +l.valor});
+  taxL.forEach(t=>{const r=D.ls.find(l=>l.id===t.vinculo_id);const f=r?.forma_recebimento||'nao_informado';const o=porForma[f]=porForma[f]||{n:0,v:0,t:0};o.t-= +t.valor});
+  const formas=Object.entries(porForma).sort((a,b)=>b[1].v-a[1].v);
+  // por empresa
+  const porEmp=Object.values(D.emp).map(x=>{const b=sum(idx.map(m=>x.fatSel[m]));const im=sum(x.rows.filter(r=>!r.sobreLucro).map(r=>sum(idx.map(m=>r.dist[m]*x.share[m]))));const i2=sum(x.rows.filter(r=>r.sobreLucro).map(r=>sum(idx.map(m=>r.dist[m]*x.share[m]))));const tx=-sum(taxL.filter(l=>l.empresa_id===x.e.id).map(l=>l.valor));return {e:x.e,b,im,i2,tx}}).filter(x=>x.b);
+  const tiles=[
+    ['Faturamento bruto',k(bruto),deltaChip(bruto,brutoAnt),'vs '+labelCurto(ant.a,ant.p)],
+    ['Taxas de cartão',k(taxas),`<span class="chip mute">${pct(taxas/bruto)} do bruto</span>`,''],
+    ['Impostos sobre faturamento',k(imp),`<span class="chip warn">${pct(imp/bruto)} efetivo</span>`,'pagos no mês seguinte'],
+    ['IRPJ e CSLL',k(ir),`<span class="chip warn">${pct(ir/bruto)}</span>`,'provisão; pagos por trimestre'],
+    ['Sobra do faturamento',k(liq),`<span class="chip ${liq/bruto>.7?'good':'info'}">${pct(liq/bruto)} do bruto</span>`,'depois de taxas e impostos']];
+  const hi=new Set(idx);
+  return aviso+`
+  <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">${podeEditarAlguma()?'<a class="btn ghost" href="#tributos">Impostos e maquininha</a><button class="btn" data-acao="novo-fat">Registrar faturamento</button>':''}</div>
+  <section class="grid g-tiles">${tiles.map(t=>`<div class="tile"><div class="lbl">${t[0]}</div><div class="val">${t[1]}</div><div class="cmp">${t[2]}<span>${t[3]}</span></div></div>`).join('')}</section>
+  <div class="panel"><h2>Para onde vai cada real faturado · ${S.ano}</h2><p class="hint">Faturamento bruto por mês dividido em taxas da maquininha, impostos sobre o faturamento, IRPJ/CSLL e o que sobra. Barras fortes: ${labelPer()}.</p>
+    ${chartStack({labels:MESES,hi,series:[{nome:'Sobra',cor:'var(--accent)',vals:liqAno},{nome:'Impostos sobre faturamento',cor:'var(--warn)',vals:impM},{nome:'IRPJ e CSLL',cor:'var(--bad)',vals:irM},{nome:'Taxas de cartão',cor:'var(--ink-3)',vals:taxAno}]})}
+    <div class="legend"><span><i style="background:var(--accent)"></i>Sobra</span><span><i style="background:var(--warn)"></i>Impostos sobre faturamento</span><span><i style="background:var(--bad)"></i>IRPJ e CSLL</span><span><i style="background:var(--ink-3)"></i>Taxas de cartão</span></div></div>
+  <section class="grid g-2e">
+    <div class="panel"><h2>Por forma de recebimento</h2><p class="hint">${labelPer()} · taxa efetiva conforme os acordos com a maquininha</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Forma</th><th class="n">Vendas</th><th class="n">Bruto</th><th class="n">% do total</th><th class="n">Taxa</th><th class="n">Taxa %</th></tr></thead><tbody>
+      ${formas.map(([f,o])=>`<tr><td>${esc(FORMAS[f]||'Não informado')}</td><td class="n">${o.n}</td><td class="n">${num.format(Math.round(o.v))}</td><td class="n">${pct(o.v/bruto)}</td><td class="n">${o.t?num.format(Math.round(o.t)):'–'}</td><td class="n">${o.t?pct(o.t/o.v):'–'}</td></tr>`).join('')}
+      <tr class="tot"><td>Total</td><td class="n">${fatL.length}</td><td class="n">${num.format(Math.round(bruto))}</td><td class="n">100,0%</td><td class="n">${num.format(Math.round(taxas))}</td><td class="n">${pct(taxas/bruto)}</td></tr></tbody></table></div></div>
+    <div class="panel"><h2>Por empresa</h2><p class="hint">${labelPer()} · impostos pelo regime de cada CNPJ${S.sel.size<unidades().length?', rateados pelos prédios marcados':''}</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Empresa</th><th class="n">Bruto</th><th class="n">Impostos</th><th class="n">Efetivo</th><th class="n">IRPJ/CSLL</th><th class="n">Taxas</th></tr></thead><tbody>
+      ${porEmp.map(x=>`<tr><td>${esc(nomeEmp(x.e))}<span class="unit">${esc(REGIMES[x.e.regime_tributario]||'regime não definido')}</span></td><td class="n">${num.format(Math.round(x.b))}</td><td class="n">${num.format(Math.round(x.im))}</td><td class="n">${pct(x.im/x.b)}</td><td class="n">${num.format(Math.round(x.i2)||0)}</td><td class="n">${num.format(Math.round(x.tx)||0)}</td></tr>`).join('')}</tbody></table></div></div>
+  </section>
+  ${await painelCaixaImpostos(D)}
+  ${painelAgenda(D)}
+  ${painelReforma(D)}`;
+}
+
+async function painelCaixaImpostos(D){
+  const [pagas,abertas]=await Promise.all([parcelasPagas(S.ano),parcelasAbertas()]);
+  const rec=Array(12).fill(0),imp=Array(12).fill(0),impPrev=Array(12).fill(0);const A=String(S.ano);
+  const ehRecVenda=p=>{const c=conta(p.lancamentos?.conta_id);return c?.grupo_dre==='receita_bruta'};
+  pagas.filter(p=>parcNaSel(p)&&ehRecVenda(p)).forEach(p=>rec[+p.data_pagamento.slice(5,7)-1]+= +(p.valor_pago??p.valor));
+  abertas.filter(p=>parcNaSel(p)&&ehRecVenda(p)&&p.vencimento.startsWith(A)).forEach(p=>rec[+p.vencimento.slice(5,7)-1]+= +p.valor);
+  Object.values(D.emp).forEach(x=>{const share=sum(x.fatSel)/(sum(x.fat)||1);
+    [...x.rows,...x.rowsAnt].forEach(r=>{if(!r.venc.startsWith(A))return;const v=(r.ap?+r.ap.valor:r.valor)*share;(r.ap?imp:impPrev)[+r.venc.slice(5,7)-1]+=v})});
+  const linha=(n,v,cls='')=>`<tr class="${cls}"><td>${n}</td>${v.map(x=>`<td class="n ${x<0?'neg':''}">${x?num.format(Math.round(x)):''}</td>`).join('')}<td class="n ${sum(v)<0?'neg':''}">${num.format(Math.round(sum(v)))}</td></tr>`;
+  const saldo=rec.map((r,i)=>r-imp[i]-impPrev[i]);
+  return `<div class="panel"><h2>Efeito no caixa · ${S.ano}</h2><p class="hint">Recebimentos das vendas pela data em que o dinheiro entra (cartão já líquido da taxa) e impostos pela data de vencimento: os do faturamento no mês seguinte à NF, IRPJ e CSLL no mês seguinte ao trimestre.</p>
+    <div class="tbl-wrap"><table><thead><tr><th>Linha</th>${MESES.map(m=>`<th class="n">${m}</th>`).join('')}<th class="n">Total</th></tr></thead><tbody>
+    ${linha('Recebimentos de vendas',rec)}${linha('(-) Impostos já lançados',imp.map(v=>-v))}${linha('(-) Impostos a lançar (previsão)',impPrev.map(v=>-v))}${linha('Sobra no caixa',saldo,'tot')}
+    </tbody></table></div></div>`;
+}
+function painelAgenda(D){
+  const rows=Object.values(D.emp).flatMap(x=>x.rows).sort((a,b)=>a.venc.localeCompare(b.venc)||a.emp.razao_social.localeCompare(b.emp.razao_social));
+  const mesAtual=HOJE.slice(0,7)+'-01';
+  const fechado=r=>r.fim<mesAtual;
+  const pend=rows.filter(r=>fechado(r)&&podeEditar(r.emp.id)&&(!r.ap||Math.abs(+r.ap.valor-r.valor)>0.009));
+  if(!rows.length)return '';
+  const perTxt=r=>r.trimestral?`${Math.floor(r.m0/3)+1}º tri/${String(S.ano).slice(2)}`:`${MESES[r.m0]}/${String(S.ano).slice(2)}`;
+  return `<div class="panel"><div class="ph"><div><h2>Agenda de impostos · ${S.ano}</h2><p class="hint">Valores do CNPJ inteiro. “Lançar” cria a conta a pagar do imposto com o vencimento; períodos ainda abertos ficam como previsão.</p></div>
+    ${pend.length?`<button class="btn" data-acao="lancar-pendentes">Lançar ${pend.length} apuraç${pend.length>1?'ões':'ão'} pendente${pend.length>1?'s':''}</button>`:''}</div>
+    <div class="tbl-wrap" style="max-height:460px;overflow:auto"><table><thead><tr><th>Vencimento</th><th>Empresa</th><th>Imposto</th><th>Competência</th><th class="n">Faturamento</th><th class="n">Base</th><th class="n">Alíquota efetiva</th><th class="n">Valor</th><th>Situação</th></tr></thead><tbody>
+    ${rows.map(r=>{const st=r.ap?(Math.abs(+r.ap.valor-r.valor)>0.009?`<span class="chip warn">Lançado ${brl2.format(r.ap.valor)}, recalcular</span>`:'<span class="chip good">Lançado</span>'):fechado(r)?'<span class="chip bad">A lançar</span>':'<span class="chip mute">Previsão</span>';
+      const bt=fechado(r)&&podeEditar(r.emp.id)&&(!r.ap||Math.abs(+r.ap.valor-r.valor)>0.009)?` <button class="linkbtn small" data-acao="lancar-apuracao" data-emp="${r.emp.id}" data-imp="${esc(r.imposto)}" data-ini="${r.ini}">${r.ap?'Recalcular':'Lançar'}</button>`:'';
+      return `<tr><td class="mono">${dataBR(r.venc)}</td><td>${esc(nomeEmp(r.emp))}</td><td><b>${esc(r.imposto)}</b></td><td>${perTxt(r)}</td><td class="n">${num.format(Math.round(r.fat))}</td><td class="n">${num.format(Math.round(r.base))}</td><td class="n">${pct(r.valor/(r.fat||1))}</td><td class="n">${brl2.format(r.valor)}</td><td>${st}${bt}</td></tr>`}).join('')}
+    </tbody></table></div></div>`;
+}
+async function lancarApuracao(r){
+  if(r.ap){const {error}=await sb.from('apuracoes').delete().eq('id',r.ap.id);if(error)throw error}
+  const ct=(r.cfg.conta_id&&conta(r.cfg.conta_id))||contaCod(r.emp.id,r.sobreLucro?(r.imposto==='CSLL'?'7.01.002':'7.01.001'):'3.02.001');
+  if(!ct)throw new Error('Conta do imposto '+r.imposto+' não encontrada no plano da '+nomeEmp(r.emp));
+  const {data:ap,error}=await sb.from('apuracoes').insert({empresa_id:r.emp.id,imposto:r.imposto,periodo_inicio:r.ini,periodo_fim:r.fim,base:r2(r.base),aliquota_efetiva:r.fat?r.valor/r.fat:0,valor:r.valor,vencimento:r.venc}).select().single();if(error)throw error;
+  const id=uuid();const per=r.trimestral?`${Math.floor(r.m0/3)+1}º trimestre/${r.ini.slice(0,4)}`:`${MESES[r.m0]}/${r.ini.slice(0,4)}`;
+  const {error:e2}=await sb.from('lancamentos').insert({id,empresa_id:r.emp.id,conta_id:ct.id,competencia:r.fim,descricao:`${r.imposto} ${per}`,valor:-r.valor,origem:'apuracao',apuracao_id:ap.id});if(e2)throw e2;
+  const {error:e3}=await sb.from('parcelas').insert({empresa_id:r.emp.id,lancamento_id:id,numero:1,vencimento:r.venc,valor:-r.valor,status:'aberta',forma_pagamento:r.imposto==='DAS'?'DAS':'DARF/guia'});if(e3)throw e3;
+}
+
+// ---------- reforma tributária (LC 214/2025): transição 2026 a 2033
+const REDUCOES={0:'Alíquota cheia',30:'Redução de 30% (profissões regulamentadas)',60:'Redução de 60% (saúde, educação e outros)',70:'Redução de 70% (locação de imóveis)'};
+const TRANSICAO={2026:{pc:1,ii:1,cbs:0,ibs:0,txt:'Teste: CBS 0,9% e IBS 0,1% destacados na NF e compensados. Carga igual à de hoje.'},
+  2027:{pc:0,ii:1,cbs:-.1,ibs:.1,txt:'PIS e COFINS acabam; entra a CBS cheia. ISS e ICMS continuam.'},
+  2028:{pc:0,ii:1,cbs:-.1,ibs:.1,txt:'Igual a 2027.'},2029:{pc:0,ii:.9,ibs:'r10',txt:'ISS e ICMS caem para 90%; IBS em 10% da alíquota.'},
+  2030:{pc:0,ii:.8,ibs:'r20',txt:'ISS e ICMS em 80%; IBS em 20%.'},2031:{pc:0,ii:.7,ibs:'r30',txt:'ISS e ICMS em 70%; IBS em 30%.'},
+  2032:{pc:0,ii:.6,ibs:'r40',txt:'ISS e ICMS em 60%; IBS em 40%.'},2033:{pc:0,ii:0,ibs:'r100',txt:'ISS e ICMS acabam; IBS cheio.'}};
+function painelReforma(D){
+  const R=S.reforma=S.reforma||{cbs:8.8,ibs:17.7,red:0,compras:null};
+  const anoFat=Object.values(D.emp).reduce((a,x)=>a+sum(x.fatSel),0);
+  if(!anoFat)return '';
+  const simples=Object.values(D.emp).filter(x=>x.e.regime_tributario==='simples_nacional');
+  const outros=Object.values(D.emp).filter(x=>x.e.regime_tributario!=='simples_nacional');
+  const fat=sum(outros.map(x=>sum(x.fatSel)));
+  const soma=imps=>sum(outros.map(x=>{const sh=sum(x.fatSel)/(sum(x.fat)||1);return sum(x.rows.filter(r=>imps.includes(r.imposto)).map(r=>r.valor))*sh}));
+  const pc=soma(['PIS','COFINS']),ii=soma(['ISS','ICMS']);
+  const dAno=dre(D.ls.filter(l=>naSel(l.empresa_id,l.predio_id)&&outros.some(x=>x.e.id===l.empresa_id)));
+  const comprasPadrao=dAno.rb?Math.round(-dAno.cu/dAno.rb*1000)/10:0;const comprasPct=R.compras??comprasPadrao;
+  const anos=Object.keys(TRANSICAO).map(Number);
+  const linhas=anos.map(a=>{const t=TRANSICAO[a];const cbs=a===2026?0:R.cbs+(t.cbs||0);const ibs=a===2026?0:typeof t.ibs==='string'?R.ibs*(+t.ibs.slice(1))/100:t.ibs;
+    const tx=(cbs+ibs)/100;const debito=fat*tx*(1-R.red/100),credito=fat*comprasPct/100*tx;const novoIva=Math.max(0,debito-credito);
+    const vCbs=tx?novoIva*cbs/(cbs+ibs):0,vIbs=novoIva-vCbs;const total=pc*t.pc+ii*t.ii+novoIva;return {a,t,pc:pc*t.pc,ii:ii*t.ii,cbs:vCbs,ibs:vIbs,total}});
+  const hoje=pc+ii;const fim=linhas.at(-1);
+  const inp=(id,v,label,extra='')=>`<div class="field"><label for="${id}">${label}</label><input id="${id}" data-ref="${id}" inputmode="decimal" value="${String(v).replace('.',',')}" ${extra}></div>`;
+  return `<div class="panel"><div class="ph"><div><h2>Reforma tributária: quanto muda para você</h2><p class="hint">Simulação sobre o faturamento de ${S.ano} (${k(fat)}${simples.length?', sem as empresas do Simples':''}) com as regras de transição da LC 214/2025. IRPJ e CSLL não mudam.</p></div></div>
+    <div class="form-grid f4" style="margin-bottom:12px">
+      ${inp('cbs',R.cbs,'Alíquota de referência CBS (%)')}${inp('ibs',R.ibs,'Alíquota de referência IBS (%)')}
+      <div class="field"><label for="red">Redução de alíquota da sua atividade</label><select id="red" data-ref="red">${Object.entries(REDUCOES).map(([v,n])=>`<option value="${v}" ${+v===R.red?'selected':''}>${n}</option>`).join('')}</select></div>
+      ${inp('compras',comprasPct,'Compras que geram crédito (% do faturamento)')}</div>
+    ${fat?`<section class="grid g-tiles" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px">
+      <div class="tile"><div class="lbl">Hoje (PIS, COFINS, ISS, ICMS)</div><div class="val">${k(hoje)}</div><div class="cmp">${pct(hoje/fat)} do faturamento</div></div>
+      <div class="tile"><div class="lbl">Em 2033, regra final</div><div class="val">${k(fim.total)}</div><div class="cmp">${pct(fim.total/fat)} do faturamento</div></div>
+      <div class="tile"><div class="lbl">Diferença por ano</div><div class="val">${k(fim.total-hoje)}</div><div class="cmp"><span class="chip ${fim.total>hoje*1.005?'bad':fim.total<hoje*.995?'good':'mute'}">${fim.total>=hoje?'▲':'▼'} ${pct(Math.abs(fim.total-hoje)/(hoje||1))}</span>${fim.total>hoje?'paga mais':'paga menos'}</div></div></section>
+    ${chartAnos({labels:anos.map(String),atual:anos.map(()=>hoje),novo:linhas.map(l=>l.total)})}
+    <div class="legend"><span><i style="background:var(--plan)"></i>Regras de hoje</span><span><i style="background:var(--bad)"></i>Com a reforma, paga mais</span><span><i style="background:var(--good)"></i>Com a reforma, paga menos</span></div>
+    <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>Ano</th><th>O que acontece</th><th class="n">PIS/COFINS</th><th class="n">ISS/ICMS</th><th class="n">CBS</th><th class="n">IBS</th><th class="n">Total</th><th class="n">% do fat.</th><th class="n">vs hoje</th></tr></thead><tbody>
+    ${linhas.map(l=>`<tr><td class="mono">${l.a}</td><td class="wrap" style="min-width:260px"><span class="why" style="max-width:none">${l.t.txt}</span></td><td class="n">${num.format(Math.round(l.pc))}</td><td class="n">${num.format(Math.round(l.ii))}</td><td class="n">${num.format(Math.round(l.cbs))}</td><td class="n">${num.format(Math.round(l.ibs))}</td><td class="n"><b>${num.format(Math.round(l.total))}</b></td><td class="n">${pct(l.total/fat)}</td><td class="n">${deltaChip(l.total,hoje,true)}</td></tr>`).join('')}
+    </tbody></table></div>`:''}
+    <div class="effect" style="margin-top:12px"><b>Pontos de atenção</b><ul>
+      <li><b>Créditos:</b> na CBS e no IBS tudo o que você compra com nota (mercadoria, serviços, aluguel, energia) gera crédito. Quanto mais compras com nota, menor o imposto final. Ajuste o campo “Compras que geram crédito”.</li>
+      <li><b>Split payment:</b> a partir da implantação, a maquininha e os bancos poderão reter a CBS e o IBS no momento da liquidação. O imposto sai do caixa no dia do recebimento, não mais no mês seguinte.</li>
+      <li><b>Preço:</b> a CBS e o IBS são cobrados “por fora”, destacados na nota. A simulação mantém o faturamento de hoje como base.</li>
+      ${simples.length?`<li><b>Simples Nacional (${simples.map(x=>esc(nomeEmp(x.e))).join(', ')}):</b> continua no DAS. Clientes empresas só aproveitam como crédito o que você paga no DAS. A partir de 2027 dá para optar por recolher CBS e IBS fora do DAS, o que gera crédito integral para eles.</li>`:''}
+      <li>As alíquotas de referência são estimativas e serão fixadas por resolução do Senado. Valide a simulação com seu contador antes de decidir preço ou regime.</li></ul></div></div>`;
+}
+
+// ---------- registrar faturamento
+function acordosPara(emp,forma,parc,data){return S.acordos.filter(a=>a.empresa_id===emp&&a.ativo&&a.modalidade===forma&&parc>=a.parcelas_de&&parc<=a.parcelas_ate&&a.vigencia_inicio<=data&&(!a.vigencia_fim||a.vigencia_fim>=data))}
+function calcFat(f){
+  const emp=f.empresa.value,forma=f.forma.value,n=Math.max(1,+f.parcelas.value||1),data=f.emissao.value||HOJE;const bruto=parseValor(f.valor.value)||0;
+  const ac=CARTAO.has(forma)?S.acordos.find(a=>a.id===f.acordo.value)||acordosPara(emp,forma,n,data)[0]:null;
+  const taxa=ac?r2(bruto*ac.taxa_percentual/100+(+ac.taxa_fixa||0)):0;
+  const liq=r2(bruto-taxa);let receb=[];
+  if(ac){const q=forma==='credito_parcelado'&&!ac.antecipacao?n:1;const pb=r2(liq/q);for(let i=0;i<q;i++)receb.push({venc:addDias(data,ac.prazo_dias+30*i),valor:i<q-1?pb:r2(liq-pb*(q-1))})}
+  else receb=[{venc:f.vencimento.value||data,valor:bruto}];
+  return {emp,forma,n,data,bruto,ac,taxa,liq,receb};
+}
+function previewFat(f){
+  const c=calcFat(f);const sel=f.acordo;const ops=CARTAO.has(c.forma)?acordosPara(c.emp,c.forma,c.n,c.data):[];
+  const atual=sel.value;sel.innerHTML=ops.length?ops.map(a=>`<option value="${a.id}" ${a.id===atual?'selected':''}>${esc(a.prestador)} · ${String(a.taxa_percentual).replace('.',',')}% · D+${a.prazo_dias}</option>`).join(''):`<option value="">${CARTAO.has(c.forma)?'Nenhum acordo cadastrado para esta forma':'Não se aplica'}</option>`;
+  sel.disabled=!ops.length;f.parcelas.closest('.field').hidden=c.forma!=='credito_parcelado';f.vencimento.closest('.field').hidden=CARTAO.has(c.forma)&&!!ops.length;
+  const c2=calcFat(f);
+  document.getElementById('fatPrev').innerHTML=c2.bruto?`<div class="kv"><div><small>Bruto</small><span>${brl2.format(c2.bruto)}</span></div><div><small>Taxa da maquininha</small><span>${brl2.format(c2.taxa)}</span></div><div><small>Você recebe</small><span>${brl2.format(c2.liq)}</span></div></div>
+    <div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Recebimento</th><th class="n">Valor</th></tr></thead><tbody>${c2.receb.map(r=>`<tr><td class="mono">${dataBR(r.venc)}</td><td class="n">${brl2.format(r.valor)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted" style="margin:0">Informe o valor para ver taxa, líquido e datas de recebimento.</p>';
+}
+function formFat(){
+  const emp=selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id));if(!emp)return;const f=camposEmpresa(emp.id);
+  const contasRec=S.contas.filter(c=>c.empresa_id===emp.id&&c.analitica&&c.ativa&&c.grupo_dre==='receita_bruta');
+  drawer(`<h3>Registrar faturamento</h3><p class="muted" style="margin:0">Entra na DRE pela data de emissão da NF. Os impostos são calculados sobre ele e vão para a agenda de impostos.</p>
+  <form data-form="fat" class="form-grid">
+    <div class="field wide"><label for="fEmp2">Empresa</label><select id="fEmp2" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>
+    <div class="field"><label for="fPred2">Prédio</label><select id="fPred2" name="predio">${f.pred}</select></div>
+    <div class="field"><label for="fEmi">Emissão da NF</label><input id="fEmi" name="emissao" type="date" required value="${HOJE}"></div>
+    <div class="field"><label for="fNf">Número da NF</label><input id="fNf" name="nf"></div>
+    <div class="field wide"><label for="fConta">Conta de receita</label><select id="fConta" name="conta" required>${contasRec.map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label for="fCli">Cliente</label><input id="fCli" name="parceiro" list="dlParc" autocomplete="off"></div>
+    <div class="field"><label for="fCC">Centro de custo</label><select id="fCC" name="centro">${f.cc}</select></div>
+    <div class="field"><label for="fVal">Valor bruto (R$)</label><input id="fVal" name="valor" required inputmode="decimal" placeholder="1.000,00"></div>
+    <div class="field"><label for="fForma">Forma de recebimento</label><select id="fForma" name="forma">${Object.entries(FORMAS).map(([v,n])=>`<option value="${v}">${n}</option>`).join('')}</select></div>
+    <div class="field" hidden><label for="fParc">Parcelas</label><input id="fParc" name="parcelas" type="number" min="1" max="24" value="2"></div>
+    <div class="field"><label for="fAc">Acordo da maquininha</label><select id="fAc" name="acordo"></select></div>
+    <div class="field"><label for="fVenc">Vencimento</label><input id="fVenc" name="vencimento" type="date" value="${HOJE}"></div>
+    <div class="field"><label for="fBanco">Conta bancária</label><select id="fBanco" name="banco">${f.bancos}</select></div>
+    <div class="wide" id="fatPrev"></div>
+    <datalist id="dlParc">${S.parceiros.filter(p=>p.empresa_id===emp.id).map(p=>`<option value="${esc(p.nome)}">`).join('')}</datalist>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar faturamento</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+  previewFat(document.querySelector('form[data-form=fat]'));
+}
+const FORMS_FAT={
+  async fat(f){
+    const c=calcFat(f);if(!c.bruto||c.bruto<0)return toast('Informe o valor bruto.');
+    if(CARTAO.has(c.forma)&&c.forma!=='pix'&&!c.ac)return toast('Cadastre o acordo da maquininha para '+FORMAS[c.forma]+' em Impostos e maquininha.');
+    let parcId=null;const pn=f.parceiro.value.trim();
+    if(pn){const p=S.parceiros.find(x=>x.empresa_id===c.emp&&norm(x.nome)===norm(pn));if(p)parcId=p.id;else{const {data,error}=await sb.from('parceiros').insert({empresa_id:c.emp,nome:pn,cliente:true}).select('id,empresa_id,documento,nome').single();if(error)throw error;S.parceiros.push(data);parcId=data.id}}
+    const id=uuid(),nf=f.nf.value.trim();
+    const {error}=await sb.from('lancamentos').insert({id,empresa_id:c.emp,predio_id:f.predio.value||null,conta_id:f.conta.value,centro_custo_id:f.centro.value||null,parceiro_id:parcId,competencia:c.data,descricao:nf?'NF '+nf:null,valor:c.bruto,origem:'faturamento',numero_nf:nf||null,forma_recebimento:c.forma,parcelas_receb:c.forma==='credito_parcelado'?c.n:1,acordo_id:c.ac?.id||null});if(error)throw error;
+    if(c.taxa){const ct=(c.ac.conta_id&&conta(c.ac.conta_id))||contaCod(c.emp,'6.01.004');if(!ct)throw new Error('Conta 6.01.004 de taxas não encontrada no plano.');
+      const {error:e2}=await sb.from('lancamentos').insert({empresa_id:c.emp,predio_id:f.predio.value||null,conta_id:ct.id,centro_custo_id:f.centro.value||null,competencia:c.data,descricao:`Taxa ${c.ac.prestador}${nf?' · NF '+nf:''}`,valor:-c.taxa,origem:'taxa_cartao',vinculo_id:id,acordo_id:c.ac.id});if(e2)throw e2}
+    const {error:e3}=await sb.from('parcelas').insert(c.receb.map((r,i)=>({empresa_id:c.emp,lancamento_id:id,numero:i+1,vencimento:r.venc,valor:r.valor,status:'aberta',forma_pagamento:FORMAS[c.forma],conta_bancaria_id:f.banco.value||null,centro_custo_id:f.centro.value||null})));if(e3)throw e3;
+    invalidar();await carregarAnos();fecharDrawer();toast('Faturamento registrado'+(c.taxa?`; taxa de ${brl2.format(c.taxa)} lançada`:'')+'.');render()},
+  async regime(f){const emp=f.dataset.emp;const {error}=await sb.from('empresas').update({regime_tributario:f.regime.value,atividade:f.atividade.value}).eq('id',emp);if(error)throw error;
+    if(f.aplicar.checked){const {error:e1}=await sb.from('impostos_config').delete().eq('empresa_id',emp);if(e1)throw e1;
+      const rows=modeloImpostos(f.regime.value,f.atividade.value).map(([imp,per,al,pr,ad,lim,dia,cod])=>({empresa_id:emp,imposto:imp,periodicidade:per,aliquota:al,presuncao:pr,adicional_aliquota:ad,adicional_limite:lim,dia_vencimento:dia,conta_id:contaCod(emp,cod)?.id||null}));
+      const {error:e2}=await sb.from('impostos_config').insert(rows);if(e2)throw e2}
+    fecharDrawer();toast('Regime tributário salvo.');await recarregarCad()},
+  async imposto(f){const d={imposto:f.imposto.value.trim().toUpperCase(),periodicidade:f.periodicidade.value,aliquota:parseValor(f.aliquota.value),presuncao:f.presuncao.value.trim()?parseValor(f.presuncao.value):null,adicional_aliquota:f.adicional.value.trim()?parseValor(f.adicional.value):null,adicional_limite:f.limite.value.trim()?parseValor(f.limite.value):null,dia_vencimento:+f.dia.value,conta_id:f.conta.value||null,vigencia_inicio:f.inicio.value||'2000-01-01',vigencia_fim:f.fim.value||null};
+    if(isNaN(d.aliquota))return toast('Informe a alíquota.');
+    const q=f.dataset.id?sb.from('impostos_config').update(d).eq('id',f.dataset.id):sb.from('impostos_config').insert({...d,empresa_id:f.dataset.emp});const {error}=await q;if(error)throw error;fecharDrawer();toast('Imposto salvo.');await recarregarCad()},
+  async acordo(f){const d={prestador:f.prestador.value.trim(),modalidade:f.modalidade.value,parcelas_de:+f.de.value||1,parcelas_ate:+f.ate.value||1,taxa_percentual:parseValor(f.taxa.value),taxa_fixa:parseValor(f.fixa.value)||0,prazo_dias:+f.prazo.value||0,antecipacao:f.antecipacao.checked,conta_id:f.conta.value||null,vigencia_inicio:f.inicio.value||'2000-01-01',vigencia_fim:f.fim.value||null,ativo:f.ativo?f.ativo.checked:true};
+    if(isNaN(d.taxa_percentual))return toast('Informe a taxa.');if(d.parcelas_ate<d.parcelas_de)return toast('“Parcelas até” precisa ser maior ou igual a “de”.');
+    const q=f.dataset.id?sb.from('acordos_cartao').update(d).eq('id',f.dataset.id):sb.from('acordos_cartao').insert({...d,empresa_id:f.dataset.emp});const {error}=await q;if(error)throw error;fecharDrawer();toast('Acordo salvo.');await recarregarCad()},
+};
+
+// ---------- tela de cadastro: impostos e maquininha
+function vTributos(){
+  if(!S.empresas.length)return semEmpresa();
+  if(!S.empresas.some(e=>e.id===S.tribEmp))S.tribEmp=(selEmp()[0]||S.empresas[0]).id;
+  const e=empresa(S.tribEmp),ed=podeEditar(e.id),imps=S.impostos.filter(c=>c.empresa_id===e.id).sort((a,b)=>a.periodicidade.localeCompare(b.periodicidade)||a.imposto.localeCompare(b.imposto)),acs=S.acordos.filter(a=>a.empresa_id===e.id).sort((a,b)=>a.prestador.localeCompare(b.prestador)||a.modalidade.localeCompare(b.modalidade)||a.parcelas_de-b.parcelas_de);
+  const n2=v=>v==null?'–':String(+v).replace('.',',');
+  return `<div class="panel"><div class="ph"><div><h2>Regime tributário</h2><p class="hint" style="margin:0">${e.regime_tributario?`${esc(REGIMES[e.regime_tributario])} · ${esc(ATIVIDADES[e.atividade]||'')}`:'Ainda não definido. Escolha o regime para o sistema calcular os impostos.'}</p></div>
+    <div class="ctrls"><select id="tribEmp" aria-label="Empresa">${opcoesEmp(e.id,false)}</select>${ed?'<button class="btn" data-acao="definir-regime">'+(e.regime_tributario?'Alterar regime':'Definir regime')+'</button>':''}</div></div></div>
+  <div class="panel"><div class="ph"><div><h2>Impostos sobre o faturamento e o lucro</h2><p class="hint">Calculados sobre o faturamento pela data de emissão da NF. Mensais vencem no mês seguinte; trimestrais no mês seguinte ao trimestre (o dia 31 vira o último dia útil).</p></div>${ed?'<button class="btn ghost" data-acao="novo-imposto">Adicionar imposto</button>':''}</div>
+    ${imps.length?`<div class="tbl-wrap"><table><thead><tr><th>Imposto</th><th>Apuração</th><th class="n">Alíquota</th><th class="n">Presunção</th><th class="n">Adicional</th><th class="n">Vence dia</th><th>Conta</th><th>Vigência</th></tr></thead><tbody>
+    ${imps.map(c=>`<tr class="${ed?'click':''}" ${ed?`data-acao="editar-imposto" data-id="${c.id}"`:''}><td><b>${esc(c.imposto)}</b></td><td>${c.periodicidade==='trimestral'?'Trimestral':'Mensal'}</td><td class="n">${n2(c.aliquota)}%</td><td class="n">${c.presuncao!=null?n2(c.presuncao)+'%':(['IRPJ','CSLL'].includes(c.imposto)?'lucro real':'–')}</td><td class="n">${c.adicional_aliquota?n2(c.adicional_aliquota)+'% acima de '+k(+c.adicional_limite):'–'}</td><td class="n">${c.dia_vencimento===31?'último útil':c.dia_vencimento}</td><td>${esc(conta(c.conta_id)?.codigo||'')} ${esc(conta(c.conta_id)?.nome||'')}</td><td class="mono">${c.vigencia_inicio>'2000-01-01'?dataBR(c.vigencia_inicio):'sempre'}${c.vigencia_fim?' a '+dataBR(c.vigencia_fim):''}</td></tr>`).join('')}
+    </tbody></table></div>`:'<p class="muted">Nenhum imposto configurado.</p>'}</div>
+  <div class="panel"><div class="ph"><div><h2>Acordos com a maquininha</h2><p class="hint">Taxa (MDR) e prazo de recebimento por prestador e modalidade, conforme o contrato. O faturamento em cartão já calcula a taxa e as datas de recebimento por aqui.</p></div>${ed?'<button class="btn ghost" data-acao="novo-acordo">Novo acordo</button>':''}</div>
+    ${acs.length?`<div class="tbl-wrap"><table><thead><tr><th>Prestador</th><th>Modalidade</th><th>Parcelas</th><th class="n">Taxa</th><th class="n">Tarifa fixa</th><th>Recebe em</th><th>Situação</th></tr></thead><tbody>
+    ${acs.map(a=>`<tr class="${ed?'click':''}" ${ed?`data-acao="editar-acordo" data-id="${a.id}"`:''}><td><b>${esc(a.prestador)}</b></td><td>${esc(MODALIDADES[a.modalidade])}</td><td>${a.modalidade==='credito_parcelado'?`${a.parcelas_de} a ${a.parcelas_ate}x`:'à vista'}</td><td class="n">${n2(a.taxa_percentual)}%</td><td class="n">${+a.taxa_fixa?brl2.format(a.taxa_fixa):'–'}</td><td>D+${a.prazo_dias}${a.modalidade==='credito_parcelado'?(a.antecipacao?' (antecipado)':' e +30 dias por parcela'):''}</td><td>${a.ativo?'<span class="chip good">Ativo</span>':'<span class="chip mute">Inativo</span>'}</td></tr>`).join('')}
+    </tbody></table></div>`:'<p class="muted">Nenhum acordo cadastrado.</p>'}</div>`;
+}
+function opcoesContas(emp,sel,grupos){return `<option value="">Padrão</option>${S.contas.filter(c=>c.empresa_id===emp&&c.analitica&&(!grupos||grupos.includes(c.grupo_dre))).map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}`}
+const ACOES_FAT={
+  'novo-fat':()=>formFat(),
+  'definir-regime':()=>{const e=empresa(S.tribEmp);drawer(`<h3>Regime tributário · ${esc(nomeEmp(e))}</h3><form data-form="regime" data-emp="${e.id}" class="form-grid">
+    <div class="field" style="grid-column:span 2"><label for="rReg">Regime</label><select id="rReg" name="regime">${Object.entries(REGIMES).map(([v,n])=>`<option value="${v}" ${e.regime_tributario===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="rAt">Atividade principal</label><select id="rAt" name="atividade">${Object.entries(ATIVIDADES).map(([v,n])=>`<option value="${v}" ${e.atividade===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="aplicar" checked> Substituir os impostos pelo modelo do regime (você ajusta as alíquotas depois)</label>
+    <div class="wide effect">Modelos: <b>Simples</b> DAS com alíquota efetiva de 6% (ajuste para a sua faixa). <b>Presumido</b> PIS 0,65% e COFINS 3% (dia 25), ISS 5% (dia 15) ou ICMS efetivo 4% (dia 20), IRPJ 15% + 10% acima de R$ 60 mil e CSLL 9% sobre a presunção (32% serviços e locação; 8% e 12% comércio), no último dia útil do mês seguinte ao trimestre. <b>Real</b> PIS 1,65% e COFINS 7,6% e IRPJ/CSLL sobre o lucro do trimestre.</div>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)},
+  'novo-imposto':()=>formImposto(),'editar-imposto':b=>formImposto(b.dataset.id),
+  'novo-acordo':()=>formAcordo(),'editar-acordo':b=>formAcordo(b.dataset.id),
+  'excluir-imposto':async b=>{if(!confirm('Excluir este imposto da configuração?'))return;const {error}=await sb.from('impostos_config').delete().eq('id',b.dataset.id);if(error)throw error;fecharDrawer();await recarregarCad()},
+  'excluir-acordo':async b=>{if(!confirm('Excluir este acordo? Faturamentos antigos mantêm a taxa já lançada.'))return;const {error}=await sb.from('acordos_cartao').delete().eq('id',b.dataset.id);if(error)throw error;fecharDrawer();await recarregarCad()},
+  'lancar-apuracao':async b=>{b.disabled=true;const D=await dadosFat(S.ano);const r=D.emp[b.dataset.emp]?.rows.find(x=>x.imposto===b.dataset.imp&&x.ini===b.dataset.ini);if(!r)return;await lancarApuracao(r);await carregarApuracoes();invalidar();toast(`${r.imposto} lançado em contas a pagar, vencimento ${dataBR(r.venc)}.`);render(true)},
+  'lancar-pendentes':async b=>{b.disabled=true;const D=await dadosFat(S.ano);const mesAtual=HOJE.slice(0,7)+'-01';const rs=Object.values(D.emp).flatMap(x=>x.rows).filter(r=>r.fim<mesAtual&&podeEditar(r.emp.id)&&(!r.ap||Math.abs(+r.ap.valor-r.valor)>0.009));
+    for(const r of rs)await lancarApuracao(r);await carregarApuracoes();invalidar();toast(`${rs.length} apurações lançadas em contas a pagar.`);render(true)},
+};
+function formImposto(id){const c=id?S.impostos.find(x=>x.id===id):null;const emp=c?c.empresa_id:S.tribEmp;
+  drawer(`<h3>${c?'Editar imposto':'Adicionar imposto'}</h3><form data-form="imposto" data-id="${id||''}" data-emp="${emp}" class="form-grid">
+    <div class="field"><label for="iImp">Imposto</label><input id="iImp" name="imposto" required value="${esc(c?.imposto||'')}" placeholder="ISS"></div>
+    <div class="field"><label for="iPer">Apuração</label><select id="iPer" name="periodicidade"><option value="mensal">Mensal</option><option value="trimestral" ${c?.periodicidade==='trimestral'?'selected':''}>Trimestral</option></select></div>
+    <div class="field"><label for="iAl">Alíquota (%)</label><input id="iAl" name="aliquota" required inputmode="decimal" value="${c?String(+c.aliquota).replace('.',','):''}"></div>
+    <div class="field"><label for="iPr">Presunção (% da receita)</label><input id="iPr" name="presuncao" inputmode="decimal" value="${c?.presuncao!=null?String(+c.presuncao).replace('.',','):''}" placeholder="só IRPJ/CSLL presumido"></div>
+    <div class="field"><label for="iAd">Adicional (%)</label><input id="iAd" name="adicional" inputmode="decimal" value="${c?.adicional_aliquota!=null?String(+c.adicional_aliquota).replace('.',','):''}"></div>
+    <div class="field"><label for="iLim">Adicional acima de (R$)</label><input id="iLim" name="limite" inputmode="decimal" value="${c?.adicional_limite!=null?String(+c.adicional_limite).replace('.',','):''}"></div>
+    <div class="field"><label for="iDia">Dia do vencimento</label><input id="iDia" name="dia" type="number" min="1" max="31" value="${c?.dia_vencimento||20}"></div>
+    <div class="field" style="grid-column:span 2"><label for="iCt">Conta da DRE</label><select id="iCt" name="conta">${opcoesContas(emp,c?.conta_id,['deducoes','ir_csll'])}</select></div>
+    <div class="field"><label for="iIni">Vale a partir de</label><input id="iIni" name="inicio" type="date" value="${c&&c.vigencia_inicio>'2000-01-01'?c.vigencia_inicio:''}"></div>
+    <div class="field"><label for="iFim">Até</label><input id="iFim" name="fim" type="date" value="${c?.vigencia_fim||''}"></div>
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${c?`<button type="button" class="btn ghost" data-acao="excluir-imposto" data-id="${c.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+function formAcordo(id){const a=id?S.acordos.find(x=>x.id===id):null;const emp=a?a.empresa_id:S.tribEmp;
+  drawer(`<h3>${a?'Editar acordo':'Novo acordo com a maquininha'}</h3><form data-form="acordo" data-id="${id||''}" data-emp="${emp}" class="form-grid">
+    <div class="field"><label for="aPr">Prestador</label><input id="aPr" name="prestador" required value="${esc(a?.prestador||'')}" placeholder="Stone, Cielo, Rede…"></div>
+    <div class="field"><label for="aMod">Modalidade</label><select id="aMod" name="modalidade">${Object.entries(MODALIDADES).map(([v,n])=>`<option value="${v}" ${a?.modalidade===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="aTx">Taxa (%)</label><input id="aTx" name="taxa" required inputmode="decimal" value="${a?String(+a.taxa_percentual).replace('.',','):''}"></div>
+    <div class="field"><label for="aDe">Parcelas de</label><input id="aDe" name="de" type="number" min="1" max="24" value="${a?.parcelas_de||1}"></div>
+    <div class="field"><label for="aAte">Parcelas até</label><input id="aAte" name="ate" type="number" min="1" max="24" value="${a?.parcelas_ate||1}"></div>
+    <div class="field"><label for="aFx">Tarifa fixa por venda (R$)</label><input id="aFx" name="fixa" inputmode="decimal" value="${a&&+a.taxa_fixa?String(+a.taxa_fixa).replace('.',','):''}"></div>
+    <div class="field"><label for="aPz">Recebe em (dias, D+)</label><input id="aPz" name="prazo" type="number" min="0" value="${a?.prazo_dias??30}"></div>
+    <div class="field" style="grid-column:span 2"><label for="aCt">Conta da taxa</label><select id="aCt" name="conta">${opcoesContas(emp,a?.conta_id)}</select></div>
+    <div class="field"><label for="aIni">Vale a partir de</label><input id="aIni" name="inicio" type="date" value="${a&&a.vigencia_inicio>'2000-01-01'?a.vigencia_inicio:''}"></div>
+    <div class="field"><label for="aFim">Até</label><input id="aFim" name="fim" type="date" value="${a?.vigencia_fim||''}"></div>
+    <label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="antecipacao" ${a?.antecipacao?'checked':''}> Parcelado com antecipação automática (recebe tudo no prazo acima; a taxa já inclui a antecipação)</label>
+    ${a?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" ${a.ativo?'checked':''}> Acordo ativo</label>`:''}
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${a?`<button type="button" class="btn ghost" data-acao="excluir-acordo" data-id="${a.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+</script>
+<script>
 // ===================== navegação e filtros
 const ROTAS=[
- ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['lancamentos','Lançamentos'],
+ ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['lancamentos','Lançamentos'],
  ['g','Controle'],['auditoria','Auditoria de extratos',1],['nfs','Notas fiscais',1],['estoque','Estoque',1],
  ['g','Planejamento'],['orcamento','Orçamento e espelhos',1],['premissas','Premissas de prazo',1],
- ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
+ ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios};
-const USA_PERIODO=new Set(['painel','dre','lancamentos']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas']);
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos};
+const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','faturamento']);
 function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
 function renderNav(r){
   document.getElementById('nav').innerHTML=ROTAS.filter(x=>!x[3]||S.master).map(([id,n,soon])=>id==='g'?`<div class="nav-group">${n}</div>`:`<a href="#${id}" class="${id===r?'on':''}">${n}${soon?'<span class="soon">em breve</span>':''}</a>`).join('');
@@ -956,6 +1310,7 @@ async function entrar(user){
 }
 async function iniciar(){
   if(!sb){telaAuth('erro','A biblioteca de acesso ao banco não carregou.');return}
+  if(window.DEMO){document.getElementById('filtros').insertAdjacentHTML('afterbegin','<span class="demo">Demonstração · dados fictícios</span>');const {data,error}=await sb.auth.signInWithPassword({email:MASTER_EMAIL,password:'demo'});if(!error)return entrar(data.user)}
   const {data:{session}}=await sb.auth.getSession();
   if(/access_token|error_description/.test(location.hash))history.replaceState(null,'',BASE_URL);
   if(LINK_ERRO){telaAuth('login',/expired|invalid/i.test(decodeURIComponent(LINK_ERRO))?'O link do e-mail expirou ou já foi usado. Peça um novo em “Esqueci minha senha”.':decodeURIComponent(LINK_ERRO.replace(/\+/g,' ')));return}
@@ -1015,17 +1370,20 @@ const FORMS={
     else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});toast('Convite enviado para '+f.email.value.trim()+'.')}
     S.usuarios=null;fecharDrawer();render()},
 };
-
+Object.assign(FORMS,FORMS_FAT);
 // ===================== eventos
 document.addEventListener('submit',async ev=>{const f=ev.target;const fn=FORMS[f.dataset.form];if(!fn)return;ev.preventDefault();busy(f,true);
   try{await fn(f)}catch(err){console.error(err);toast(traduz(err))}finally{if(document.body.contains(f))busy(f,false)}});
 document.getElementById('fEmp').onclick=ev=>{ev.stopPropagation();document.getElementById('pop')?fecharPop():renderPop()};
 document.getElementById('fAno').onchange=ev=>{S.ano=+ev.target.value;render()};
 document.getElementById('fPer').onchange=ev=>{S.per.v=+ev.target.value;render()};
-document.addEventListener('input',ev=>{if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
+document.addEventListener('input',ev=>{if(ev.target.form?.dataset.form==='fat'){previewFat(ev.target.form);return}if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
 document.addEventListener('change',ev=>{const t=ev.target;
   if(t.id==='arqImp'&&t.files[0])lerPlanilha(t.files[0]);
   else if(t.id==='planoEmp'){S.planoEmp=t.value;render()}
+  else if(t.id==='tribEmp'){S.tribEmp=t.value;render()}
+  else if(t.dataset.ref){const v=t.dataset.ref==='red'?+t.value:parseValor(t.value);if(!isNaN(v)){S.reforma[t.dataset.ref]=v;render(true)}}
+  else if(t.form?.dataset.form==='fat'){if(t.hasAttribute('data-troca-emp'))trocaEmpForm(t);previewFat(t.form)}
   else if(t.hasAttribute('data-troca-emp'))trocaEmpForm(t);
   else if(t.dataset.ue&&!t.checked)t.form.querySelectorAll(`[data-emp="${t.dataset.ue}"]`).forEach(x=>x.checked=false);
   else if(t.dataset.up&&t.checked){const e=t.form.querySelector(`[data-ue="${t.dataset.emp}"]`);if(e)e.checked=true}
@@ -1062,6 +1420,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='desfazer-imp')await desfazerImport(b.dataset.id);
   else if(a==='convidar')formUsuario();
   else if(a==='editar-usuario')formUsuario(b.dataset.uid);
+  else if(ACOES_FAT[a])await ACOES_FAT[a](b);
   else if(a==='reenviar'){b.disabled=true;await chamarAdmin({acao:'reenviar',email:b.dataset.email,redirectTo:BASE_URL});toast('E-mail de acesso reenviado para '+b.dataset.email+'.');b.disabled=false}
   }catch(err){console.error(err);toast(traduz(err));b.disabled=false}
 });
