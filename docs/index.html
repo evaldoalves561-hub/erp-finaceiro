@@ -180,7 +180,10 @@ a.btn{text-decoration:none;display:inline-block}
 .checks input{accent-color:var(--accent)}
 .loading{opacity:.55;pointer-events:none}
 .soon{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--side-ink-2);border:1px solid var(--side-hi);border-radius:4px;padding:0 4px}
-.chart-scroll{overflow-x:auto}.form-grid.f4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.chart-scroll{overflow-x:auto}
+.grade{font-size:12.5px}.grade th:first-child,.grade td:first-child{position:sticky;left:0;background:var(--surface);z-index:1;min-width:220px}.grade thead th{position:sticky;top:0;background:var(--surface);z-index:2}.grade thead th:first-child{z-index:3}
+.cel{width:78px;font:inherit;font-variant-numeric:tabular-nums;text-align:right;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:4px 6px}.cel:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.ver.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.form-grid.f4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width:820px){.chart-scroll svg{min-width:720px}.form-grid.f4{grid-template-columns:repeat(2,minmax(0,1fr))}.g-tiles[style]{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tile .val{font-size:18px}.form-grid{grid-template-columns:minmax(0,1fr)}.userbox{display:none}}
 </style>
 </head><body>
@@ -299,7 +302,7 @@ function labelCurto(a=S.ano,p=S.per){return p.tipo==='ano'?String(a):p.tipo==='t
 
 // ===================== carga de dados
 async function carregarCadastros(){
-  const [emp,pre,ct,cc,bc,pa,ue,pr,ic,ac]=await Promise.all([
+  const [emp,pre,ct,cc,bc,pa,ue,pr,ic,ac,pm]=await Promise.all([
     sb.from('empresas').select('*').order('razao_social'),
     sb.from('predios').select('*').order('nome'),
     todos(()=>sb.from('plano_contas').select('*').order('codigo')),
@@ -310,9 +313,10 @@ async function carregarCadastros(){
     sb.from('produtos').select('id,empresa_id,codigo,nome'),
     sb.from('impostos_config').select('*'),
     sb.from('acordos_cartao').select('*'),
+    sb.from('premissas_conta').select('*'),
   ]);
-  for(const r of [emp,pre,cc,bc,ue,pr,ic,ac])if(r.error)throw r.error;
-  S.empresas=emp.data;S.predios=pre.data;S.contas=ct;S.centros=cc.data;S.bancos=bc.data;S.parceiros=pa;S.produtos=pr.data;S.impostos=ic.data;S.acordos=ac.data;
+  for(const r of [emp,pre,cc,bc,ue,pr,ic,ac,pm])if(r.error)throw r.error;
+  S.empresas=emp.data;S.predios=pre.data;S.contas=ct;S.centros=cc.data;S.bancos=bc.data;S.parceiros=pa;S.produtos=pr.data;S.impostos=ic.data;S.acordos=ac.data;S.premissas=pm.data;S.versoes={};S.todasVer=null;S.linhasOrc={};S.caixaOrc={};
   S.papeis=Object.fromEntries(ue.data.map(x=>[x.empresa_id,x.papel]));
   const keys=new Set(unidades().map(u=>u.key));
   if(!S.sel.size||[...S.sel].some(k=>!keys.has(k)))S.sel=keys;else unidades().forEach(u=>{if(!S._conhecidas?.has(u.key))S.sel.add(u.key)});
@@ -857,8 +861,6 @@ const EM_BREVE={
   auditoria:['Auditoria de extratos','Você envia o extrato (OFX ou CSV) e o sistema mostra o que bate com os lançamentos, o que tem valor diferente e o que não foi lançado, sugerindo a conta do plano.'],
   nfs:['Notas fiscais','Entrada de notas por e-mail automático, foto e XML. Nota de estoque gera a entrada no estoque e as parcelas de pagamento.'],
   estoque:['Estoque','Saldo por produto e prédio, custo médio, mínimo e movimentações vindas das notas.'],
-  orcamento:['Orçamento e espelhos','Orçamento por competência e por caixa, com versões congeladas (espelhos) para comparar com o realizado.'],
-  premissas:['Premissas de prazo','Por conta do plano: antecedência de compra, prazos e dias de pagamento que transformam o orçamento em fluxo de caixa.'],
 };
 function vEmBreve(r){const [t,txt]=EM_BREVE[r];return vazio(t+' · próxima fase',`<p style="margin:0 auto;max-width:60ch">${txt}</p><p class="muted" style="margin:8px 0 0">O banco de dados já tem as tabelas desta tela. Enquanto ela é construída, veja como vai ficar no protótipo.</p>`,`<a class="btn ghost" href="${PROTOTIPO}" target="_blank" rel="noopener">Ver no protótipo</a>`)}
 </script>
@@ -1213,15 +1215,241 @@ function formAcordo(id){const a=id?S.acordos.find(x=>x.id===id):null;const emp=a
     <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${a?`<button type="button" class="btn ghost" data-acao="excluir-acordo" data-id="${a.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
 </script>
 <script>
+// ===================== Orçamento travado, forecast, desvios e caixa orçado
+const ORDEM_GRUPOS=['receita_bruta','deducoes','custos','despesas_operacionais','resultado_financeiro','outras','nao_operacional','ir_csll'];
+const REGRAS={a_vista:'No próprio mês',dias_corridos:'Dias após a competência',dia_fixo_mes_seguinte:'Dia fixo do mês seguinte'};
+async function lotes(tab,rows,sel){const out=[];for(let i=0;i<rows.length;i+=500){let q=sb.from(tab).insert(rows.slice(i,i+500));if(sel)q=q.select(sel);const {data,error}=await q;if(error)throw error;if(data)out.push(...data)}return out}
+async function todasVersoes(forcar){if(forcar||!S.todasVer){const {data,error}=await sb.from('orcamento_versoes').select('*').order('ano',{ascending:false}).order('criado_em');if(error)throw error;S.todasVer=data;S.versoes={}}return S.todasVer}
+async function versoesDe(emp,forcar){const t=await todasVersoes(forcar);S.versoes=S.versoes||{};if(!S.versoes[emp])S.versoes[emp]=t.filter(v=>v.empresa_id===emp).sort((a,b)=>b.ano-a.ano||String(a.criado_em).localeCompare(String(b.criado_em)));return S.versoes[emp]}
+async function linhasDe(verId,forcar){S.linhasOrc=S.linhasOrc||{};if(forcar||!S.linhasOrc[verId])S.linhasOrc[verId]=todos(()=>sb.from('orcamento_linhas').select('id,empresa_id,conta_id,predio_id,centro_custo_id,competencia,valor').eq('versao_id',verId)).catch(e=>{delete S.linhasOrc[verId];throw e});return S.linhasOrc[verId]}
+const premissaDe=(conta_id,data)=>S.premissas.filter(p=>p.conta_id===conta_id&&p.vigencia_inicio<=data&&(!p.vigencia_fim||p.vigencia_fim>=data)).sort((a,b)=>b.vigencia_inicio.localeCompare(a.vigencia_inicio))[0];
+// transforma uma linha de competência em datas de caixa pela premissa da conta
+function caixaDaLinha(contaId,comp,valor){
+  const p=premissaDe(contaId,comp);const base=addDias(comp.slice(0,8)+'15',-(p?.antecedencia_compra_dias||0));
+  if(!p||p.regra==='a_vista')return [{data:base,valor}];
+  if(p.regra==='dia_fixo_mes_seguinte'){const d=new Date(base+'T12:00:00Z');return [{data:vencDia(d.getUTCFullYear(),d.getUTCMonth()+1,p.dia_fixo||10),valor}]}
+  const pr=(p.prazos_dias&&p.prazos_dias.length?p.prazos_dias:[30]);const q=pr.length,parte=r2(valor/q);
+  return pr.map((d,i)=>({data:addDias(base,d),valor:i<q-1?parte:r2(valor-parte*(q-1))}));
+}
+async function caixaDaVersao(v){
+  if(v.congelada){S.caixaOrc=S.caixaOrc||{};if(!S.caixaOrc[v.id])S.caixaOrc[v.id]=await todos(()=>sb.from('orcamento_caixa').select('conta_id,data_caixa,valor').eq('versao_id',v.id));return S.caixaOrc[v.id].map(x=>({conta_id:x.conta_id,data:x.data_caixa,valor:+x.valor}))}
+  const ls=await linhasDe(v.id);return ls.flatMap(l=>caixaDaLinha(l.conta_id,l.competencia,+l.valor).map(c=>({conta_id:l.conta_id,data:c.data,valor:c.valor,linha_id:l.id})));
+}
+const contasOrc=emp=>S.contas.filter(c=>c.empresa_id===emp&&c.analitica&&c.ativa).sort((a,b)=>{const ga=ORDEM_GRUPOS.indexOf(a.grupo_dre),gb=ORDEM_GRUPOS.indexOf(b.grupo_dre);return (ga<0?99:ga)-(gb<0?99:gb)||a.codigo.localeCompare(b.codigo,undefined,{numeric:true})});
+const sinal=c=>c?.tipo==='receita'?1:-1;
+const parseCel=v=>{const t=String(v??'').trim().replace(/[R$\s]/g,'');if(!t)return 0;if(t.includes(','))return parseFloat(t.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(\.\d{3})+$/.test(t))return parseFloat(t.replace(/\./g,''))||0;return parseFloat(t)||0};
+const fmtIn=v=>v?String(Math.round(Math.abs(v)*100)/100).replace('.',','):'';
+function realizadoPorConta(ls,emp){const o={};ls.filter(l=>l.empresa_id===emp).forEach(l=>{const m=+l.competencia.slice(5,7)-1;(o[l.conta_id]=o[l.conta_id]||Array(12).fill(0))[m]+= +l.valor});return o}
+function matriz(linhas,predio){const o={};linhas.filter(l=>predio===undefined||(l.predio_id||'')===predio).forEach(l=>{const m=+l.competencia.slice(5,7)-1;(o[l.conta_id]=o[l.conta_id]||Array(12).fill(0))[m]+= +l.valor});return o}
+
+async function vOrcamento(){
+  if(!S.empresas.length)return semEmpresa();
+  if(!S.empresas.some(e=>e.id===S.orcEmp)){const tv=await todasVersoes();const cand=selEmp().length?selEmp():S.empresas;S.orcEmp=(cand.find(e=>tv.some(v=>v.empresa_id===e.id))||cand[0]).id}
+  const emp=S.orcEmp,vs=await versoesDe(emp),ed=podeEditar(emp);
+  if(!vs.some(v=>v.id===S.orcVer))S.orcVer=(vs.find(v=>v.ano===S.ano&&v.tipo==='orcamento'&&v.congelada)||vs.find(v=>v.ano===S.ano)||vs[0])?.id;
+  const v=vs.find(x=>x.id===S.orcVer);S.orcTab=S.orcTab||'editar';
+  const cab=`<div class="panel"><div class="ph"><div><h2>Orçamento e forecast</h2><p class="hint" style="margin:0">O orçamento travado vira o espelho oficial do ano. Os forecasts juntam o realizado até um mês com a nova previsão do restante, e mostram os desvios.</p></div>
+    <div class="ctrls"><select id="orcEmp" aria-label="Empresa">${opcoesEmp(emp,false)}</select>${ed?'<button class="btn ghost" data-acao="nova-versao" data-tipo="forecast">Novo forecast</button><button class="btn" data-acao="nova-versao" data-tipo="orcamento">Novo orçamento</button>':''}</div></div>
+    ${vs.length?`<div class="versions" style="flex-direction:row;flex-wrap:wrap">${vs.map(x=>`<button class="ver ${x.id===S.orcVer?'on':''}" data-ver="${x.id}" style="text-align:left;font:inherit;color:inherit;min-width:200px"><div><b>${esc(x.nome)}</b><small>${x.tipo==='forecast'?`Forecast · realizado até ${MESES[(x.mes_corte||1)-1]}`:'Orçamento'} · ${x.ano}</small></div>${x.congelada?'<span class="chip info">🔒 Travado</span>':'<span class="chip warn">Rascunho</span>'}</button>`).join('')}</div>`:''}</div>`;
+  if(!v)return cab+vazio('Nenhum orçamento para esta empresa','<p style="margin:0">Crie o orçamento do ano. Você pode começar do realizado do ano anterior com um percentual de ajuste e depois editar mês a mês.</p>',ed?'<button class="btn" data-acao="nova-versao" data-tipo="orcamento">Novo orçamento</button>':'');
+  const tabs=`<div class="tabs" role="tablist">${[['editar',v.congelada?'Valores':'Editar valores'],['acomp','Orçado x realizado x forecast'],['caixa','Fluxo de caixa orçado']].map(([id,n])=>`<button role="tab" data-orctab="${id}" class="${S.orcTab===id?'on':''}">${n}</button>`).join('')}</div>`;
+  const corpo=S.orcTab==='acomp'?await abaAcomp(emp,vs,v):S.orcTab==='caixa'?await abaCaixa(emp,v):await abaEditar(emp,v,ed);
+  return cab+`<div class="panel">${tabs}${corpo}</div>`;
+}
+async function abaEditar(emp,v,ed){
+  const ls=await linhasDe(v.id);const ps=S.predios.filter(p=>p.empresa_id===emp);if(S.orcPredio!=null&&S.orcPredio!=='*'&&S.orcPredio!==''&&!ps.some(p=>p.id===S.orcPredio))S.orcPredio=null;const pred=S.orcPredio??(ps.length&&ls.some(l=>l.predio_id)?'*':'');const M=matriz(ls,pred==='*'?undefined:pred);
+  const real=v.tipo==='forecast'?realizadoPorConta(await lancAno(v.ano),emp):null;const corte=v.tipo==='forecast'?v.mes_corte:0;
+  const edita=ed&&!v.congelada&&pred!=='*';S.orcEdit=S.orcEdit&&S.orcEdit.ver===v.id&&S.orcEdit.pred===pred?S.orcEdit:{ver:v.id,pred,vals:{},sujo:false};
+  const val=(c,m)=>{const k_=c.id+'|'+m;return k_ in S.orcEdit.vals?S.orcEdit.vals[k_]:(M[c.id]?.[m]||0)};
+  const cs=contasOrc(emp);
+  let rows='',grupo=null;const totMes=Array(12).fill(0);
+  const totalGrupo=g=>MESES.map((_,m)=>sum(cs.filter(c=>c.grupo_dre===g).map(c=>val(c,m))));
+  cs.forEach((c,ri)=>{
+    if(c.grupo_dre!==grupo){grupo=c.grupo_dre;const tg=totalGrupo(grupo);rows+=`<tr class="grp-row"><td>${esc(GRUPOS[grupo]||'Sem grupo da DRE')}</td>${tg.map(x=>`<td class="n ${x<0?'neg':''}">${x?num.format(Math.round(x)):''}</td>`).join('')}<td class="n">${num.format(Math.round(sum(tg)))}</td>${edita?'<td></td>':''}</tr>`}
+    const vals=MESES.map((_,m)=>val(c,m));vals.forEach((x,m)=>totMes[m]+=x);
+    rows+=`<tr><td style="padding-left:18px">${esc(c.codigo)} ${esc(c.nome)}</td>${vals.map((x,m)=>{const fixo=!edita||m<corte;return `<td class="n" style="padding:3px 4px">${fixo?`<span class="${m<corte?'muted':''}">${x?num.format(Math.round(Math.abs(x))):''}</span>`:`<input class="cel" data-cel="${c.id}|${m}" data-r="${ri}" data-m="${m}" inputmode="decimal" value="${fmtIn(x)}" aria-label="${esc(c.nome)} ${MESES[m]}">`}</td>`}).join('')}<td class="n" data-tot="${c.id}">${num.format(Math.round(Math.abs(sum(vals))))}</td>${edita?`<td><button class="linkbtn small" data-acao="repetir" data-cid="${c.id}" title="Repetir o primeiro mês editável nos seguintes">→</button></td>`:''}</tr>`});
+  rows+=`<tr class="tot"><td>Resultado</td>${totMes.map(x=>`<td class="n ${x<0?'neg':''}">${num.format(Math.round(x))}</td>`).join('')}<td class="n ${sum(totMes)<0?'neg':''}">${num.format(Math.round(sum(totMes)))}</td>${edita?'<td></td>':''}</tr>`;
+  return `<div class="ph" style="margin-top:6px"><div><p class="hint" style="margin:0">${pred==='*'&&!v.congelada&&ed?'Visão consolidada, só leitura. Escolha um prédio, ou “Sem prédio”, para editar os valores. ':''}${v.congelada?`Travado em ${dataBR(String(v.congelada_em||'').slice(0,10))}. Não pode mais ser alterado: para revisar, crie um forecast a partir dele.`:'Digite valores positivos: o sinal vem do tipo da conta. Pode colar um bloco do Excel numa célula.'}${corte?` Meses até ${MESES[corte-1]} trazem o realizado e ficam fixos.`:''}</p></div>
+    <div class="ctrls">${ps.length?`<select id="orcPredio" aria-label="Prédio"><option value="*" ${pred==='*'?'selected':''}>Todos os prédios (consolidado)</option><option value="" ${pred===''?'selected':''}>Sem prédio (empresa)</option>${ps.map(p=>`<option value="${p.id}" ${pred===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select>`:''}
+    ${edita?`<button class="btn ghost" data-acao="excluir-versao" data-id="${v.id}" style="color:var(--bad)">Excluir rascunho</button><button class="btn ghost" data-acao="travar-versao" data-id="${v.id}">Travar</button><button class="btn" data-acao="salvar-orc" ${S.orcEdit.sujo?'':'disabled'}>Salvar alterações</button>`:''}</div></div>
+    <div class="tbl-wrap" style="max-height:70vh;overflow:auto"><table class="grade"><thead><tr><th>Conta</th>${MESES.map(m=>`<th class="n">${m}/${String(v.ano).slice(2)}</th>`).join('')}<th class="n">Total</th>${edita?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function salvarOrc(){
+  const E=S.orcEdit;const v=(S.versoes[S.orcEmp]||[]).find(x=>x.id===E.ver);if(!v||v.congelada)return;
+  const ls=await linhasDe(v.id);const M=matriz(ls,E.pred);
+  Object.entries(E.vals).forEach(([key,x])=>{const [c,m]=key.split('|');(M[c]=M[c]||Array(12).fill(0))[+m]=x});
+  let q=sb.from('orcamento_linhas').delete().eq('versao_id',v.id);q=E.pred?q.eq('predio_id',E.pred):q.is('predio_id',null);const {error}=await q;if(error)throw error;
+  const rows=[];Object.entries(M).forEach(([c,arr])=>arr.forEach((x,m)=>{if(x)rows.push({empresa_id:v.empresa_id,versao_id:v.id,conta_id:c,predio_id:E.pred||null,competencia:ym(v.ano,m)+'-01',valor:r2(x)})}));
+  await lotes('orcamento_linhas',rows);S.orcEdit=null;await linhasDe(v.id,true);toast('Orçamento salvo.');render(true);
+}
+function formVersao(tipo){
+  const emp=S.orcEmp,vs=S.versoes[emp]||[];const anoSug=tipo==='forecast'?S.ano:Math.max(S.ano,+HOJE.slice(0,4))+(+HOJE.slice(5,7)>=10?1:0);
+  const bases=vs.filter(v=>tipo==='forecast'?true:true);const mesCorte=Math.max(1,+HOJE.slice(5,7)-1);
+  drawer(`<h3>${tipo==='forecast'?'Novo forecast':'Novo orçamento'} · ${esc(nomeEmp(empresa(emp)))}</h3>
+  <p class="muted" style="margin:0">${tipo==='forecast'?'O forecast traz o realizado até o mês escolhido e copia o restante da versão base. Depois você ajusta os meses que faltam.':'Comece em branco, a partir do realizado do ano anterior ou copiando outra versão. Depois de revisar, trave para virar o espelho oficial.'}</p>
+  <form data-form="versao" data-tipo="${tipo}" class="form-grid">
+    <div class="field"><label for="vAno">Ano</label><input id="vAno" name="ano" type="number" required value="${anoSug}"></div>
+    <div class="field" style="grid-column:span 2"><label for="vNome">Nome</label><input id="vNome" name="nome" required value="${tipo==='forecast'?`Forecast ${anoSug} · ${MESES[mesCorte-1]}`:`Orçamento ${anoSug}`}"></div>
+    ${tipo==='forecast'?`<div class="field" style="grid-column:span 2"><label for="vBase">Versão base</label><select id="vBase" name="base" required>${bases.map(v=>`<option value="${v.id}">${esc(v.nome)}${v.congelada?' (travado)':''}</option>`).join('')||'<option value="">Crie um orçamento primeiro</option>'}</select></div>
+      <div class="field"><label for="vCorte">Realizado até</label><select id="vCorte" name="corte">${MESES.map((m,i)=>`<option value="${i+1}" ${i+1===mesCorte?'selected':''}>${m}</option>`).join('')}</select></div>`
+    :`<div class="field" style="grid-column:span 2"><label for="vOrig">Começar com</label><select id="vOrig" name="origem"><option value="realizado">Realizado do ano anterior</option><option value="vazio">Em branco</option>${bases.map(v=>`<option value="v:${v.id}">Cópia de ${esc(v.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label for="vAj">Ajuste (%)</label><input id="vAj" name="ajuste" inputmode="decimal" value="0"></div>`}
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Criar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+}
+const FORMS_ORC={
+  async versao(f){
+    const emp=S.orcEmp,tipo=f.dataset.tipo,ano=+f.ano.value;let linhas=[];
+    if(tipo==='forecast'){const base=(S.versoes[emp]||[]).find(v=>v.id===f.base.value);if(!base)return toast('Escolha a versão base.');const corte=+f.corte.value;
+      const real=(await lancAno(ano)).filter(l=>l.empresa_id===emp&&+l.competencia.slice(5,7)<=corte);
+      const ag={};real.forEach(l=>{const key=l.conta_id+'|'+(l.predio_id||'')+'|'+l.competencia.slice(0,7);ag[key]=(ag[key]||0)+ +l.valor});
+      linhas=Object.entries(ag).map(([key,x])=>{const [c,p,mm]=key.split('|');return {conta_id:c,predio_id:p||null,competencia:mm+'-01',valor:r2(x)}});
+      (await linhasDe(base.id)).filter(l=>+l.competencia.slice(5,7)>corte).forEach(l=>linhas.push({conta_id:l.conta_id,predio_id:l.predio_id,centro_custo_id:l.centro_custo_id,competencia:ano+l.competencia.slice(4),valor:+l.valor}));
+      var extra={tipo:'forecast',mes_corte:corte,origem_id:base.id}}
+    else{const o=f.origem.value,aj=1+(parseValor(f.ajuste.value)||0)/100;
+      if(o==='realizado'){const ag={};(await lancAno(ano-1)).filter(l=>l.empresa_id===emp).forEach(l=>{const key=l.conta_id+'|'+(l.predio_id||'')+'|'+l.competencia.slice(5,7);ag[key]=(ag[key]||0)+ +l.valor});
+        linhas=Object.entries(ag).map(([key,x])=>{const [c,p,mm]=key.split('|');return {conta_id:c,predio_id:p||null,competencia:`${ano}-${mm}-01`,valor:r2(x*aj)}})}
+      else if(o.startsWith('v:')){linhas=(await linhasDe(o.slice(2))).map(l=>({conta_id:l.conta_id,predio_id:l.predio_id,centro_custo_id:l.centro_custo_id,competencia:ano+l.competencia.slice(4),valor:r2(+l.valor*aj)}))}
+      var extra={tipo:'orcamento',origem_id:o.startsWith('v:')?o.slice(2):null}}
+    const {data:v,error}=await sb.from('orcamento_versoes').insert({empresa_id:emp,nome:f.nome.value.trim(),ano,...extra}).select().single();if(error)throw error;
+    await lotes('orcamento_linhas',linhas.filter(l=>l.valor).map(l=>({...l,empresa_id:emp,versao_id:v.id})));
+    await versoesDe(emp,true);S.orcVer=v.id;S.orcTab='editar';S.ano=ano;fecharDrawer();toast((tipo==='forecast'?'Forecast':'Orçamento')+' criado com '+linhas.length+' valores.');render()},
+  async premissa(f){const d={regra:f.regra.value,prazos_dias:f.prazos.value.split(/[\/;, ]+/).map(Number).filter(x=>!isNaN(x)&&f.prazos.value.trim()),dia_fixo:f.dia.value?+f.dia.value:null,antecedencia_compra_dias:+f.antec.value||0,forma_pagamento:f.forma.value.trim()||null};
+    if(!d.prazos_dias.length)d.prazos_dias=[30];
+    const q=f.dataset.id?sb.from('premissas_conta').update(d).eq('id',f.dataset.id):sb.from('premissas_conta').insert({...d,empresa_id:f.dataset.emp,conta_id:f.dataset.cta,vigencia_inicio:'2000-01-01'});const {error}=await q;if(error)throw error;fecharDrawer();toast('Premissa salva.');S.caixaOrc=null;await recarregarCad()},
+};
+async function travarVersao(id){
+  const v=(S.versoes[S.orcEmp]||[]).find(x=>x.id===id);if(!v)return;
+  const cx=await caixaDaVersao(v);
+  await lotes('orcamento_caixa',cx.map(c=>({empresa_id:v.empresa_id,versao_id:v.id,linha_id:c.linha_id,conta_id:c.conta_id,data_caixa:c.data,valor:c.valor})));
+  const {error}=await sb.from('orcamento_versoes').update({congelada:true}).eq('id',v.id);if(error)throw error;
+  await versoesDe(S.orcEmp,true);fecharDrawer();toast(v.nome+' travado. O fluxo de caixa dele ficou gravado junto.');render();
+}
+
+// ---------- Orçado x realizado x forecast
+async function abaAcomp(emp,vs,v){
+  const ano=v.ano,doAno=vs.filter(x=>x.ano===ano);
+  const orc=doAno.find(x=>x.id===S.acOrc)||doAno.find(x=>x.tipo==='orcamento'&&x.congelada)||doAno.find(x=>x.tipo==='orcamento')||v;
+  const fc=S.acFc==='-'?null:doAno.find(x=>x.id===S.acFc)||[...doAno].reverse().find(x=>x.tipo==='forecast')||null;
+  const ls=(await lancAno(ano)).filter(l=>l.empresa_id===emp);
+  const ultimoReal=ls.length?Math.max(...ls.map(l=>+l.competencia.slice(5,7))):0;
+  const hm=+HOJE.slice(5,7)-1;const ate=S.acAte||Math.max(1,Math.min(ultimoReal||1,ano===+HOJE.slice(0,4)&&hm>0?hm:12));const MS=new Set([...Array(ate).keys()].map(m=>ym(ano,m)));
+  const lo=await linhasDe(orc.id),lf=fc?await linhasDe(fc.id):null;
+  const cols=[{n:'Orçado no ano',ls:lo},...(fc?[{n:'Forecast no ano',ls:lf}]:[]),{n:`Orçado até ${MESES[ate-1]}`,ls:lo.filter(l=>MS.has(l.competencia.slice(0,7)))},{n:`Realizado até ${MESES[ate-1]}`,ls:ls.filter(l=>MS.has(l.competencia.slice(0,7)))}];
+  const D=cols.map(c=>dre(c.ls));const iOA=fc?2:1,iR=fc?3:2;
+  const desv=(a,b,cls)=>cls==='pct'?ppDiff(a,b):deltaChip(a,b);
+  let rows='';
+  for(const [n,key,cls,grupos] of LINHAS_DRE){
+    if((key==='ou'||key==='ir'||key==='lair')&&D.every(d=>!d[key]))continue;
+    const ab=grupos&&S.abertos.has('o'+key);
+    rows+=`<tr class="${cls}${grupos?' click':''}" ${grupos?`data-abre="o${key}"`:''}><td>${grupos?(ab?'▾ ':'▸ '):''}${n}</td>${cell(D[0][key],cls)}${fc?cell(D[1][key],cls)+`<td class="n">${desv(D[1][key],D[0][key],cls)}</td>`:''}${cell(D[iOA][key],cls)}${cell(D[iR][key],cls)}<td class="n">${desv(D[iR][key],D[iOA][key],cls)}</td><td class="n ${D[iR][key]-D[iOA][key]<0?'neg':''}">${cls==='pct'?'':num.format(Math.round(D[iR][key]-D[iOA][key]))}</td></tr>`;
+    if(ab){const cs=S.contas.filter(c=>c.empresa_id===emp&&grupos.includes(c.grupo_dre)&&D.some(d=>d.contas[c.id]));
+      cs.forEach(c=>{const g=d=>d.contas[c.id]||0;rows+=`<tr class="l3"><td>${esc(c.codigo)} ${esc(c.nome)}</td>${cell(g(D[0]),'')}${fc?cell(g(D[1]),'')+`<td class="n">${deltaChip(g(D[1]),g(D[0]))}</td>`:''}${cell(g(D[iOA]),'')}${cell(g(D[iR]),'')}<td class="n">${deltaChip(g(D[iR]),g(D[iOA]))}</td><td class="n ${g(D[iR])-g(D[iOA])<0?'neg':''}">${num.format(Math.round(g(D[iR])-g(D[iOA])))}</td></tr>`})}
+  }
+  const mes=(arr,m)=>arr.filter(l=>+l.competencia.slice(5,7)===m+1);
+  const recR=MESES.map((_,m)=>m<ultimoReal?dre(mes(ls,m)).rb:null),recO=MESES.map((_,m)=>dre(mes(lo,m)).rb);
+  const llR=MESES.map((_,m)=>m<ultimoReal?dre(mes(ls,m)).ll:0),llO=MESES.map((_,m)=>dre(mes(lo,m)).ll),llF=lf?MESES.map((_,m)=>dre(mes(lf,m)).ll):null;
+  const sel=(id,lista,atual,vazioTxt)=>`<select id="${id}" aria-label="${vazioTxt}">${vazioTxt==='Forecast'?`<option value="">Sem forecast</option>`:''}${lista.map(x=>`<option value="${x.id}" ${x.id===atual?.id?'selected':''}>${esc(x.nome)}${x.congelada?' 🔒':''}</option>`).join('')}</select>`;
+  return `<div class="ph" style="margin-top:6px"><p class="hint" style="margin:0">Desvio = realizado menos orçado. Verde melhora o resultado, vermelho piora.</p>
+    <div class="ctrls">${sel('acOrc',doAno.filter(x=>x.tipo==='orcamento'),orc,'Orçamento')}${sel('acFc',doAno.filter(x=>x.tipo==='forecast'),fc,'Forecast')}<select id="acAte" aria-label="Realizado até">${MESES.map((m,i)=>`<option value="${i+1}" ${i+1===ate?'selected':''}>realizado até ${m}</option>`).join('')}</select></div></div>
+  <section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">
+    <div class="tile"><div class="lbl">Receita orçada ${ano}</div><div class="val">${k(D[0].rb)}</div><div class="cmp">${fc?`forecast ${k(D[1].rb)} ${deltaChip(D[1].rb,D[0].rb)}`:'sem forecast'}</div></div>
+    <div class="tile"><div class="lbl">Lucro orçado ${ano}</div><div class="val">${k(D[0].ll)}</div><div class="cmp">${fc?`forecast ${k(D[1].ll)} ${deltaChip(D[1].ll,D[0].ll)}`:'margem '+pct(D[0].ml)}</div></div>
+    <div class="tile"><div class="lbl">Receita até ${MESES[ate-1]}</div><div class="val">${k(D[iR].rb)}</div><div class="cmp">${deltaChip(D[iR].rb,D[iOA].rb)} vs orçado ${k(D[iOA].rb)}</div></div>
+    <div class="tile"><div class="lbl">Lucro até ${MESES[ate-1]}</div><div class="val">${k(D[iR].ll)}</div><div class="cmp">${deltaChip(D[iR].ll,D[iOA].ll)} vs orçado ${k(D[iOA].ll)}</div></div></section>
+  <section class="grid g-2e" style="margin-bottom:14px">
+    <div><h2 style="font-size:14px;margin:0">Receita bruta por mês</h2><p class="hint">Barras: realizado. Linha: ${esc(orc.nome)}.</p><div class="chart-scroll">${chartBarsLine({labels:MESES,bars:recR,line:recO,hi:new Set([...Array(ate).keys()]),nomeBar:'Realizado',nomeLine:'Orçado'})}</div></div>
+    <div><h2 style="font-size:14px;margin:0">Lucro líquido acumulado</h2><p class="hint">Orçado, forecast e realizado somados mês a mês.</p><div class="chart-scroll">${chartAcum({labels:MESES,series:[{nome:'Orçado',cor:'var(--ink-3)',vals:llO,tr:'4 3'},...(llF?[{nome:'Forecast',cor:'var(--warn)',vals:llF,tr:'2 3'}]:[]),{nome:'Realizado',cor:'var(--accent)',vals:llR.slice(0,ultimoReal)}]})}</div>
+      <div class="legend"><span><i style="background:var(--ink-3)"></i>Orçado</span>${llF?'<span><i style="background:var(--warn)"></i>Forecast</span>':''}<span><i style="background:var(--accent)"></i>Realizado</span></div></div></section>
+  <div class="tbl-wrap"><table><thead><tr><th>Linha</th><th class="n">Orçado no ano</th>${fc?'<th class="n">Forecast no ano</th><th class="n">Fcst x orç.</th>':''}<th class="n">Orçado até ${MESES[ate-1]}</th><th class="n">Realizado até ${MESES[ate-1]}</th><th class="n">Desvio %</th><th class="n">Desvio R$</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function chartAcum({labels,series}){
+  const W=640,H=230,L=58,R_=12,T=14,B=28,iw=W-L-R_,ih=H-T-B;const acc=series.map(s=>{let a=0;return s.vals.map(v=>a+=v||0)});
+  const all=acc.flat();const min=Math.min(0,...all)*1.1,max=Math.max(1,...all)*1.1;const n=labels.length,x=i=>L+i*(iw/(n-1)),y=v=>T+ih-((v-min)/(max-min))*ih,step=niceStep((max-min)/4);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Lucro acumulado orçado, forecast e realizado">`;
+  for(let t=Math.ceil(min/step)*step;t<=max;t+=step)s+=`<line x1="${L}" x2="${W-R_}" y1="${y(t)}" y2="${y(t)}" stroke="${Math.abs(t)<step/2?'var(--ink-3)':'var(--line)'}"/><text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${k(t).replace('R$ ','')}</text>`;
+  series.forEach((se,j)=>{const pts=acc[j].map((v,i)=>[x(i),y(v)]);if(!pts.length)return;s+=`<polyline points="${pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${se.cor}" stroke-width="${se.tr?1.6:2.4}" ${se.tr?`stroke-dasharray="${se.tr}"`:''}/>`;const e=pts.at(-1);s+=`<circle cx="${e[0]}" cy="${e[1]}" r="3.2" fill="${se.cor}"><title>${esc(se.nome)}: ${brl.format(acc[j].at(-1))}</title></circle>`});
+  labels.forEach((l,i)=>s+=`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--ink-3)">${l}</text>`);
+  return s+'</svg>';
+}
+
+// ---------- Fluxo de caixa orçado: orçado x já em contas a pagar/receber x realizado
+async function abaCaixa(emp,v){
+  const ano=v.ano,A=String(ano);
+  const [cx,pagas,abertas]=await Promise.all([caixaDaVersao(v),parcelasPagas(ano),parcelasAbertas()]);
+  const orc={e:Array(12).fill(0),s:Array(12).fill(0)},pago={e:Array(12).fill(0),s:Array(12).fill(0)},aberto={e:Array(12).fill(0),s:Array(12).fill(0)};
+  const porConta={};const pc=c=>porConta[c]=porConta[c]||{o:Array(12).fill(0),p:Array(12).fill(0),a:Array(12).fill(0)};
+  cx.filter(c=>c.data.startsWith(A)).forEach(c=>{const m=+c.data.slice(5,7)-1;(c.valor>=0?orc.e:orc.s)[m]+=c.valor;pc(c.conta_id).o[m]+=c.valor});
+  pagas.filter(p=>p.empresa_id===emp&&p.lancamentos).forEach(p=>{const m=+p.data_pagamento.slice(5,7)-1,x=+(p.valor_pago??p.valor);(x>=0?pago.e:pago.s)[m]+=x;pc(p.lancamentos.conta_id).p[m]+=x});
+  abertas.filter(p=>p.empresa_id===emp&&p.lancamentos&&p.vencimento.startsWith(A)).forEach(p=>{const m=+p.vencimento.slice(5,7)-1,x=+p.valor;(x>=0?aberto.e:aberto.s)[m]+=x;pc(p.lancamentos.conta_id).a[m]+=x});
+  const soOrc=(o,p,a)=>o>=0?Math.max(0,o-p-a):Math.min(0,o-p-a);
+  const linha=(n,arr,cls='')=>`<tr class="${cls}"><td>${n}</td>${arr.map(x=>`<td class="n ${x<0?'neg':''}">${x?num.format(Math.round(x)):''}</td>`).join('')}<td class="n ${sum(arr)<0?'neg':''}">${num.format(Math.round(sum(arr)))}</td></tr>`;
+  const sE=orc.e.map((o,m)=>soOrc(o,pago.e[m],aberto.e[m])),sS=orc.s.map((o,m)=>soOrc(o,pago.s[m],aberto.s[m]));
+  const prev=MESES.map((_,m)=>pago.e[m]+pago.s[m]+aberto.e[m]+aberto.s[m]+sE[m]+sS[m]);let ac=0;const prevAc=prev.map(x=>ac+=x);ac=0;const orcAc=orc.e.map((e,m)=>ac+=e+orc.s[m]);
+  const mSel=S.cxMes??Math.min(11,+HOJE.slice(5,7)-1);
+  const det=Object.entries(porConta).map(([c,o])=>({c:conta(c),o:o.o[mSel],p:o.p[mSel],a:o.a[mSel]})).filter(x=>x.o||x.p||x.a).sort((a,b)=>(a.c?.codigo||'').localeCompare(b.c?.codigo||'',undefined,{numeric:true}));
+  return `<p class="hint" style="margin:6px 0 10px">Caixa de ${esc(v.nome)} pelas premissas de prazo de cada conta${v.congelada?' (gravado quando a versão foi travada)':''}, comparado com o que já foi pago ou recebido e com o que já está lançado em contas a pagar e a receber. “Só no orçamento” é o que ainda não virou conta.</p>
+  <div style="margin-bottom:14px">${chartAcum({labels:MESES,series:[{nome:'Orçado',cor:'var(--ink-3)',vals:MESES.map((_,m)=>orc.e[m]+orc.s[m]),tr:'4 3'},{nome:'Previsto agora',cor:'var(--accent)',vals:prev}]})}
+    <div class="legend"><span><i style="background:var(--ink-3)"></i>Saldo acumulado orçado</span><span><i style="background:var(--accent)"></i>Previsto agora: pago + contas lançadas + o que falta do orçamento</span></div></div>
+  <div class="tbl-wrap"><table><thead><tr><th>Linha</th>${MESES.map(m=>`<th class="n">${m}</th>`).join('')}<th class="n">Total</th></tr></thead><tbody>
+    <tr class="grp-row"><td colspan="14">Entradas</td></tr>
+    ${linha('Orçado',orc.e,'l3')}${linha('Recebido',pago.e,'l3')}${linha('Em contas a receber',aberto.e,'l3')}${linha('Só no orçamento',sE,'l3')}
+    <tr class="grp-row"><td colspan="14">Saídas</td></tr>
+    ${linha('Orçado',orc.s,'l3')}${linha('Pago',pago.s,'l3')}${linha('Em contas a pagar',aberto.s,'l3')}${linha('Só no orçamento',sS,'l3')}
+    ${linha('Saldo orçado do mês',orc.e.map((e,m)=>e+orc.s[m]),'tot')}${linha('Saldo previsto agora',prev,'tot')}${linha('Desvio no mês',prev.map((x,m)=>x-orc.e[m]-orc.s[m]),'pct')}
+  </tbody></table></div>
+  <div class="ph" style="margin-top:16px"><div><h2 style="font-size:14px;margin:0">Detalhe por conta</h2><p class="hint" style="margin:0">Orçado do mês e quanto já está pago ou lançado.</p></div><select id="cxMes" aria-label="Mês">${MESES.map((m,i)=>`<option value="${i}" ${i===mSel?'selected':''}>${m}/${ano}</option>`).join('')}</select></div>
+  ${det.length?`<div class="tbl-wrap"><table><thead><tr><th>Conta</th><th class="n">Orçado</th><th class="n">Pago / recebido</th><th class="n">Em contas a pagar/receber</th><th class="n">Só no orçamento</th><th class="n">Desvio</th></tr></thead><tbody>
+  ${det.map(x=>{const so=soOrc(x.o,x.p,x.a);const dv=x.p+x.a+so-x.o;return `<tr><td>${esc(x.c?.codigo||'')} ${esc(x.c?.nome||'Sem conta')}</td><td class="n">${num.format(Math.round(x.o))}</td><td class="n">${num.format(Math.round(x.p))}</td><td class="n">${num.format(Math.round(x.a))}</td><td class="n">${num.format(Math.round(so))}</td><td class="n ${dv<0?'neg':''}">${Math.abs(dv)>=1?num.format(Math.round(dv)):'–'}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">Nada orçado ou lançado neste mês.</p>'}`;
+}
+
+// ---------- Premissas de prazo
+function vPremissas(){
+  if(!S.empresas.length)return semEmpresa();
+  if(!S.empresas.some(e=>e.id===S.premEmp))S.premEmp=(selEmp()[0]||S.empresas[0]).id;
+  const emp=S.premEmp,ed=podeEditar(emp),cs=contasOrc(emp);let g=null,rows='';
+  cs.forEach(c=>{if(c.grupo_dre!==g){g=c.grupo_dre;rows+=`<tr class="grp-row"><td colspan="5">${esc(GRUPOS[g]||'Sem grupo da DRE')}</td></tr>`}
+    const p=premissaDe(c.id,HOJE);const txt=!p||p.regra==='a_vista'?'No próprio mês':p.regra==='dia_fixo_mes_seguinte'?`Dia ${p.dia_fixo||10} do mês seguinte`:`${(p.prazos_dias||[30]).join('/')} dias`;
+    rows+=`<tr class="${ed?'click':''}" ${ed?`data-acao="editar-premissa" data-cid="${c.id}"`:''}><td style="padding-left:18px">${esc(c.codigo)} ${esc(c.nome)}</td><td>${p?esc(txt):'<span class="muted">No próprio mês (padrão)</span>'}</td><td class="n">${p?.antecedencia_compra_dias?p.antecedencia_compra_dias+' dias antes':'–'}</td><td>${esc(p?.forma_pagamento||'')}</td><td>${ed?'<span class="linkbtn small">Editar</span>':''}</td></tr>`});
+  return `<div class="panel"><div class="ph"><div><h2>Premissas de prazo por conta</h2><p class="hint" style="margin:0">Dizem quando o valor orçado de cada conta entra ou sai do caixa. Ex.: impostos no dia 20 do mês seguinte, fornecedores em 30/60 dias, vendas no cartão em 30 dias.</p></div>
+    <select id="premEmp" aria-label="Empresa">${opcoesEmp(emp,false)}</select></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Conta</th><th>Pagamento ou recebimento</th><th class="n">Compra antecipada</th><th>Forma</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function formPremissa(contaId){const c=conta(contaId),p=S.premissas.find(x=>x.conta_id===contaId&&x.vigencia_inicio==='2000-01-01')||premissaDe(contaId,HOJE);
+  drawer(`<h3>Premissa · ${esc(c.codigo)} ${esc(c.nome)}</h3><form data-form="premissa" data-id="${p?.id||''}" data-emp="${c.empresa_id}" data-cta="${c.id}" class="form-grid">
+    <div class="field wide"><label for="pRegra">Quando entra ou sai do caixa</label><select id="pRegra" name="regra">${Object.entries(REGRAS).map(([v,n])=>`<option value="${v}" ${(p?.regra||'a_vista')===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="pPrazos">Prazos em dias</label><input id="pPrazos" name="prazos" value="${esc((p?.prazos_dias||[30]).join('/'))}" placeholder="30/60/90"></div>
+    <div class="field"><label for="pDia">Dia fixo</label><input id="pDia" name="dia" type="number" min="1" max="31" value="${p?.dia_fixo||''}" placeholder="20"></div>
+    <div class="field"><label for="pAnt">Compra antecipada (dias)</label><input id="pAnt" name="antec" type="number" min="0" value="${p?.antecedencia_compra_dias||0}"></div>
+    <div class="field wide"><label for="pForma">Forma de pagamento</label><input id="pForma" name="forma" value="${esc(p?.forma_pagamento||'')}" placeholder="Boleto, PIX, cartão…"></div>
+    <div class="wide effect">Prazos em dias contam a partir do meio do mês da competência; “30/60/90” divide o valor em três partes iguais. Dia fixo do mês seguinte serve para impostos e folha (dia útil anterior se cair no fim de semana).</div>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+const ACOES_ORC={
+  'nova-versao':b=>formVersao(b.dataset.tipo),
+  'salvar-orc':async b=>{b.disabled=true;await salvarOrc()},
+  'travar-versao':b=>{const v=(S.versoes[S.orcEmp]||[]).find(x=>x.id===b.dataset.id);if(S.orcEdit?.sujo)return toast('Salve as alterações antes de travar.');
+    drawer(`<h3>Travar ${esc(v.nome)}?</h3><div class="effect">Depois de travado, este ${v.tipo==='forecast'?'forecast':'orçamento'} vira um espelho: <b>não pode mais ser alterado nem apagado</b>. O fluxo de caixa calculado pelas premissas de hoje fica gravado junto. Para revisar os números, crie um forecast a partir dele.</div><div style="display:flex;gap:8px"><button class="btn" data-acao="travar-confirma" data-id="${v.id}">Travar definitivamente</button><button class="btn ghost" data-acao="fechar">Cancelar</button></div>`)},
+  'travar-confirma':async b=>{b.disabled=true;await travarVersao(b.dataset.id)},
+  'excluir-versao':b=>drawer(`<h3>Excluir este rascunho?</h3><p class="muted" style="margin:0">Todos os valores desta versão serão apagados.</p><div style="display:flex;gap:8px"><button class="btn" style="background:var(--bad)" data-acao="excluir-versao-ok" data-id="${b.dataset.id}">Excluir</button><button class="btn ghost" data-acao="fechar">Cancelar</button></div>`),
+  'excluir-versao-ok':async b=>{const {error}=await sb.from('orcamento_versoes').delete().eq('id',b.dataset.id);if(error)throw error;await versoesDe(S.orcEmp,true);S.orcVer=null;fecharDrawer();toast('Rascunho excluído.');render()},
+  'repetir':b=>{const c=b.dataset.cid;const ins=[...document.querySelectorAll(`input[data-cel^="${c}|"]`)];const first=ins.find(i=>i.value.trim());if(!first)return;ins.forEach(i=>{if(+i.dataset.m>+first.dataset.m){i.value=first.value;marcaCel(i)}});},
+  'editar-premissa':b=>formPremissa(b.dataset.cid),
+};
+function marcaCel(i){const [c,m]=i.dataset.cel.split('|');const x=parseCel(i.value);S.orcEdit.vals[c+'|'+m]=r2(Math.abs(x)*sinal(conta(c)));S.orcEdit.sujo=true;i.style.background='var(--warn-soft)';const bt=document.querySelector('[data-acao=salvar-orc]');if(bt)bt.disabled=false;
+  const tc=document.querySelector(`[data-tot="${c}"]`);if(tc){const tr=tc.closest('tr');let t=0;tr.querySelectorAll('input.cel').forEach(x=>t+=Math.abs(parseCel(x.value)));tr.querySelectorAll('td span').forEach(x=>t+=Math.abs(parseCel(x.textContent)));tc.textContent=num.format(Math.round(t))}}
+function colarGrade(ev){const i=ev.target;const t=(ev.clipboardData||window.clipboardData).getData('text');if(!/[\t\n]/.test(t))return;ev.preventDefault();
+  const linhas=t.replace(/\r/g,'').split('\n').filter((l,ix,a)=>l||ix<a.length-1);const r0=+i.dataset.r,m0=+i.dataset.m;
+  linhas.forEach((l,dr)=>l.split('\t').forEach((x,dm)=>{const el=document.querySelector(`input[data-r="${r0+dr}"][data-m="${m0+dm}"]`);if(el){el.value=x.trim();marcaCel(el)}}));toast('Valores colados. Clique em Salvar alterações.')}
+</script>
+<script>
 // ===================== navegação e filtros
 const ROTAS=[
  ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['lancamentos','Lançamentos'],
  ['g','Controle'],['auditoria','Auditoria de extratos',1],['nfs','Notas fiscais',1],['estoque','Estoque',1],
- ['g','Planejamento'],['orcamento','Orçamento e espelhos',1],['premissas','Premissas de prazo',1],
+ ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],
  ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos};
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas};
 const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','faturamento']);
 function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
 function renderNav(r){
@@ -1370,18 +1598,27 @@ const FORMS={
     else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});toast('Convite enviado para '+f.email.value.trim()+'.')}
     S.usuarios=null;fecharDrawer();render()},
 };
-Object.assign(FORMS,FORMS_FAT);
+Object.assign(FORMS,FORMS_FAT,FORMS_ORC);
 // ===================== eventos
 document.addEventListener('submit',async ev=>{const f=ev.target;const fn=FORMS[f.dataset.form];if(!fn)return;ev.preventDefault();busy(f,true);
   try{await fn(f)}catch(err){console.error(err);toast(traduz(err))}finally{if(document.body.contains(f))busy(f,false)}});
 document.getElementById('fEmp').onclick=ev=>{ev.stopPropagation();document.getElementById('pop')?fecharPop():renderPop()};
 document.getElementById('fAno').onchange=ev=>{S.ano=+ev.target.value;render()};
 document.getElementById('fPer').onchange=ev=>{S.per.v=+ev.target.value;render()};
-document.addEventListener('input',ev=>{if(ev.target.form?.dataset.form==='fat'){previewFat(ev.target.form);return}if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
+document.addEventListener('paste',ev=>{if(ev.target.dataset?.cel)colarGrade(ev)});
+document.addEventListener('input',ev=>{if(ev.target.dataset?.cel){marcaCel(ev.target);return}if(ev.target.form?.dataset.form==='fat'){previewFat(ev.target.form);return}if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
 document.addEventListener('change',ev=>{const t=ev.target;
   if(t.id==='arqImp'&&t.files[0])lerPlanilha(t.files[0]);
   else if(t.id==='planoEmp'){S.planoEmp=t.value;render()}
   else if(t.id==='tribEmp'){S.tribEmp=t.value;render()}
+  else if(t.dataset.cel)return;
+  else if(t.id==='orcEmp'){if(S.orcEdit?.sujo&&!S._descarta){toast('Há valores não salvos. Salve antes de trocar.');t.value=S.orcEmp;return}S.orcEmp=t.value;S.orcVer=null;S.orcEdit=null;render()}
+  else if(t.id==='orcPredio'){if(S.orcEdit?.sujo){toast('Salve antes de trocar de prédio.');t.value=S.orcPredio??'*';return}S.orcPredio=t.value;S.orcEdit=null;render(true)}
+  else if(t.id==='premEmp'){S.premEmp=t.value;render()}
+  else if(t.id==='acOrc'){S.acOrc=t.value;render(true)}
+  else if(t.id==='acFc'){S.acFc=t.value||'-';render(true)}
+  else if(t.id==='acAte'){S.acAte=+t.value;render(true)}
+  else if(t.id==='cxMes'){S.cxMes=+t.value;render(true)}
   else if(t.dataset.ref){const v=t.dataset.ref==='red'?+t.value:parseValor(t.value);if(!isNaN(v)){S.reforma[t.dataset.ref]=v;render(true)}}
   else if(t.form?.dataset.form==='fat'){if(t.hasAttribute('data-troca-emp'))trocaEmpForm(t);previewFat(t.form)}
   else if(t.hasAttribute('data-troca-emp'))trocaEmpForm(t);
@@ -1400,6 +1637,8 @@ document.addEventListener('click',async ev=>{
   const dr=ev.target.closest('[data-dre]');if(dr){S.dreModo=dr.dataset.dre;render(true);return}
   const ab=ev.target.closest('[data-abre]');if(ab){const k_=ab.dataset.abre;S.abertos.has(k_)?S.abertos.delete(k_):S.abertos.add(k_);render(true);return}
   const cp=ev.target.closest('[data-cp]');if(cp){S.cpLado=cp.dataset.cp;render(true);return}
+  const vb=ev.target.closest('[data-ver]');if(vb){if(S.orcEdit?.sujo){toast('Há valores não salvos. Salve antes de trocar de versão.');return}S.orcVer=vb.dataset.ver;S.orcEdit=null;S.acOrc=S.acFc=null;render(true);return}
+  const ot=ev.target.closest('[data-orctab]');if(ot){S.orcTab=ot.dataset.orctab;render(true);return}
   const lr=ev.target.closest('[data-lanc]');if(lr){abrirLanc(lr.dataset.lanc);return}
   const cr=ev.target.closest('[data-conta]');if(cr){formConta(cr.dataset.conta);return}
   const b=ev.target.closest('[data-acao]');if(!b)return;const a=b.dataset.acao;
@@ -1421,6 +1660,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='convidar')formUsuario();
   else if(a==='editar-usuario')formUsuario(b.dataset.uid);
   else if(ACOES_FAT[a])await ACOES_FAT[a](b);
+  else if(ACOES_ORC[a])await ACOES_ORC[a](b);
   else if(a==='reenviar'){b.disabled=true;await chamarAdmin({acao:'reenviar',email:b.dataset.email,redirectTo:BASE_URL});toast('E-mail de acesso reenviado para '+b.dataset.email+'.');b.disabled=false}
   }catch(err){console.error(err);toast(traduz(err));b.disabled=false}
 });

@@ -1,6 +1,6 @@
 // Teste do app com um Supabase falso (rotas interceptadas no navegador)
 const {chromium}=require('playwright');const http=require('http');const fs=require('fs');const path=require('path');
-const APP=require('path').join(__dirname,'..','docs');const OUT=process.argv[2]||'.';
+const APP=require('path').join(__dirname,'../docs');const OUT=process.argv[2]||'.';
 const UID='11111111-1111-4111-8111-111111111111';
 let n=0;const id=()=>`00000000-0000-4000-8000-${String(++n).padStart(12,'0')}`;
 // ---------- dados falsos
@@ -22,7 +22,8 @@ for(const ano of [2025,2026])for(let m=1;m<=12;m++){if(ano===2026&&m>10)break;
 const perfis=[{usuario_id:UID,email:'evaldoalves561@gmail.com',nome:'Evaldo',master:true,ativo:true}];
 const impostos=[['PIS','mensal',.65,null,null,null,25,'3.02.003'],['COFINS','mensal',3,null,null,null,25,'3.02.003'],['ICMS','mensal',4,null,null,null,20,'3.02.004'],['IRPJ','trimestral',15,8,10,60000,31,'7.01.001'],['CSLL','trimestral',9,12,null,null,31,'7.01.002']].map(r=>({id:id(),empresa_id:empresas[0].id,imposto:r[0],periodicidade:r[1],aliquota:r[2],presuncao:r[3],adicional_aliquota:r[4],adicional_limite:r[5],dia_vencimento:r[6],conta_id:ct(empresas[0].id,r[7]),vigencia_inicio:'2000-01-01',vigencia_fim:null})).concat([{id:id(),empresa_id:empresas[1].id,imposto:'DAS',periodicidade:'mensal',aliquota:11.2,presuncao:null,adicional_aliquota:null,adicional_limite:null,dia_vencimento:20,conta_id:ct(empresas[1].id,'3.02.001'),vigencia_inicio:'2000-01-01',vigencia_fim:null}]);
 const acordos=[{id:id(),empresa_id:empresas[0].id,prestador:'Stone',modalidade:'credito_vista',parcelas_de:1,parcelas_ate:1,taxa_percentual:2.99,taxa_fixa:0,prazo_dias:30,antecipacao:false,conta_id:null,vigencia_inicio:'2000-01-01',vigencia_fim:null,ativo:true},{id:id(),empresa_id:empresas[0].id,prestador:'Stone',modalidade:'debito',parcelas_de:1,parcelas_ate:1,taxa_percentual:1.39,taxa_fixa:0,prazo_dias:1,antecipacao:false,conta_id:null,vigencia_inicio:'2000-01-01',vigencia_fim:null,ativo:true},{id:id(),empresa_id:empresas[0].id,prestador:'Stone',modalidade:'credito_parcelado',parcelas_de:2,parcelas_ate:6,taxa_percentual:3.89,taxa_fixa:0,prazo_dias:30,antecipacao:false,conta_id:null,vigencia_inicio:'2000-01-01',vigencia_fim:null,ativo:true}];
-const DB={impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
+const premissas=[['3.01.001','dias_corridos',[30],null],['4.01.001','dias_corridos',[30,60],null],['5.01.001','dia_fixo_mes_seguinte',null,5],['3.02.001','dia_fixo_mes_seguinte',null,20]].map(([c,r,p,d])=>({id:id(),empresa_id:empresas[0].id,conta_id:ct(empresas[0].id,c),vigencia_inicio:'2000-01-01',vigencia_fim:null,antecedencia_compra_dias:c==='4.01.001'?15:0,regra:r,prazos_dias:p||[30],dia_fixo:d,forma_pagamento:null}));
+const DB={orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
 const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]}];
 // ---------- PostgREST falso
 function filtrar(rows,q){
@@ -45,7 +46,7 @@ async function rotear(route){const req=route.request();const u=new URL(req.url()
   if(m==='GET'){let rows=filtrar(tab,u.searchParams);rows=embutir(t,rows,u.searchParams.get('select')||'');
     const rg=req.headers()['range'];if(rg){const [a,b]=rg.split('-').map(Number);rows=rows.slice(a,b+1)}
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(rows[0]||null);return J(rows)}
-  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
+  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();x.criado_em=x.criado_em||new Date().toISOString();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(arr[0],201);return J(arr,201)}
   if(m==='PATCH'){const b=req.postDataJSON();filtrar(tab,u.searchParams).forEach(x=>Object.assign(x,b));log.push('update '+t);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
   if(m==='DELETE'){const del=new Set(filtrar(tab,u.searchParams));for(let i=tab.length-1;i>=0;i--)if(del.has(tab[i]))tab.splice(i,1);log.push('delete '+t+' '+del.size);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
@@ -88,6 +89,19 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.click('form[data-form=fat] button:not([type=button])');await pg.waitForTimeout(800);
     await pg.evaluate(()=>location.hash='tributos');await pg.waitForTimeout(600);await shot(pg,'tributos');
     await pg.click('[data-acao=definir-regime]');await pg.waitForTimeout(200);await shot(pg,'regime');await pg.click('[data-acao=fechar]');
+    // orçamento travado, forecast e desvios
+    await pg.evaluate(()=>location.hash='orcamento');await pg.waitForTimeout(700);await pg.selectOption('#orcEmp',empresas[0].id);await pg.waitForTimeout(500);await shot(pg,'orc-vazio');
+    await pg.click('[data-acao=nova-versao][data-tipo=orcamento]');await pg.waitForTimeout(200);await pg.fill('#vAno','2026');await pg.fill('#vNome','Orçamento 2026');await pg.fill('#vAj','5');await shot(pg,'orc-novo');
+    await pg.click('form[data-form=versao] button:not([type=button])');await pg.waitForTimeout(1200);await shot(pg,'orc-consolidado');await pg.selectOption('#orcPredio',predios[0].id);await pg.waitForTimeout(500);
+    const cel=await pg.$('input.cel');await cel.fill('99.000');await cel.dispatchEvent('input');await pg.click('[data-acao=repetir]');await shot(pg,'orc-editar');
+    await pg.click('[data-acao=salvar-orc]');await pg.waitForTimeout(1200);
+    await pg.click('[data-acao=travar-versao]');await pg.waitForTimeout(200);await shot(pg,'orc-travar');await pg.click('[data-acao=travar-confirma]');await pg.waitForTimeout(1200);
+    if(!DB.orcamento_versoes[0]?.congelada)errs.push('versão não travou');if(!DB.orcamento_caixa.length)errs.push('caixa orçado não gravado');
+    await pg.click('[data-acao=nova-versao][data-tipo=forecast]');await pg.waitForTimeout(200);await pg.fill('#vAno','2026');await pg.selectOption('#vCorte','9');await pg.fill('#vNome','Forecast 2026 · Set');await pg.click('form[data-form=versao] button:not([type=button])');await pg.waitForTimeout(1200);await shot(pg,'orc-forecast');
+    await pg.click('[data-orctab=acomp]');await pg.waitForTimeout(800);await pg.click('[data-abre=orb]');await pg.waitForTimeout(300);await shot(pg,'orc-acomp');
+    await pg.click('[data-ver="'+DB.orcamento_versoes[0].id+'"]');await pg.click('[data-orctab=caixa]');await pg.waitForTimeout(900);await shot(pg,'orc-caixa');
+    await pg.evaluate(()=>location.hash='premissas');await pg.waitForTimeout(600);await pg.selectOption('#premEmp',empresas[0].id);await pg.waitForTimeout(400);await shot(pg,'premissas');await pg.click('[data-acao=editar-premissa]');await pg.waitForTimeout(200);await shot(pg,'premissa-form');
+    await pg.fill('#pPrazos','30/60/90');await pg.click('form[data-form=premissa] button:not([type=button])');await pg.waitForTimeout(600);console.log('TOAST',await pg.evaluate(()=>[document.querySelector('.toast')?.textContent,typeof FORMS.premissa,!!document.querySelector('form[data-form=premissa]'),JSON.stringify(S.premissas.slice(0,1))]));
     // importação
     await pg.evaluate(()=>location.hash='importar');await pg.waitForTimeout(600);
     await pg.setInputFiles('#arqImp',{name:'antigos.csv',mimeType:'text/csv',buffer:Buffer.from(['CNPJ Empresa;Prédio;Data Competência;Data Vencimento;Data Pagamento;Conta Contábil;Centro de Custo;Produto/Serviço;Cliente/Fornecedor;CPF/CNPJ Parceiro;Documento;Descrição;Valor;Banco;Agência;Conta Corrente;Forma de Pagamento',
@@ -98,8 +112,8 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.waitForTimeout(600);await shot(pg,'import-conf');await pg.click('[data-acao=importar]');await pg.waitForTimeout(1500);await shot(pg,'import-feito');
   });
   await rodar({width:390,height:844},'mob',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForSelector('.tile',{timeout:8000});await shot(pg,'m-painel');
-    for(const r of ['dre','usuarios','importar']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}});
+    for(const r of ['dre','usuarios','importar','orcamento','premissas']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}});
   await b.close();srv.close();
-  console.log('LOG',log.join(' | '));console.log('ERROS',errs.length?errs.join('\n'):'nenhum');
+  console.log('LOG',log.join(' | '));console.log('ORC',DB.orcamento_versoes.map(v=>v.nome+' '+v.tipo+' trav:'+v.congelada).join('; '),'linhas',DB.orcamento_linhas.length,'caixa',DB.orcamento_caixa.length,'premissa1',JSON.stringify(premissas[0].prazos_dias));console.log('ERROS',errs.length?errs.join('\n'):'nenhum');
   const novos=lanc.filter(l=>l.importacao_id);console.log('importados',novos.length,novos.map(l=>l.valor+' '+l.competencia+' cc:'+(centros.find(c=>c.id===l.centro_custo_id)?.nome)+' parc:'+(parceiros.find(p=>p.id===l.parceiro_id)?.nome)).join(' ; '));
 })();
