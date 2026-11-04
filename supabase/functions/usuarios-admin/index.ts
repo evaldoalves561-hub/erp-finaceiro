@@ -68,11 +68,20 @@ Deno.serve(async (req) => {
       case "convidar": {
         const email = String(body.email ?? "").trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ erro: "E-mail inválido." }, 400);
-        const { data, error } = await admin.auth.admin.inviteUserByEmail(email, { data: { nome: body.nome }, redirectTo: body.redirectTo });
-        if (error) return json({ erro: error.message.includes("already") ? "Este e-mail já tem cadastro." : error.message }, 400);
-        if (body.nome) await admin.from("perfis").update({ nome: body.nome }).eq("usuario_id", data.user.id);
-        await gravarAcessos(data.user.id, body);
-        return json({ ok: true, usuario_id: data.user.id });
+        let novo = await admin.auth.admin.inviteUserByEmail(email, { data: { nome: body.nome }, redirectTo: body.redirectTo });
+        let link: string | null = null;
+        if (novo.error && /already|registered|exists/i.test(novo.error.message)) return json({ erro: "Este e-mail já tem cadastro." }, 400);
+        if (novo.error) {
+          // E-mail não saiu (ex.: SMTP padrão do Supabase só envia para a equipe): gera o link para enviar por WhatsApp
+          const g = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { nome: body.nome }, redirectTo: body.redirectTo } });
+          if (g.error) return json({ erro: g.error.message }, 400);
+          novo = { data: { user: g.data.user }, error: null } as typeof novo;
+          link = g.data.properties?.action_link ?? null;
+        }
+        const uid = novo.data.user!.id;
+        if (body.nome) await admin.from("perfis").update({ nome: body.nome }).eq("usuario_id", uid);
+        await gravarAcessos(uid, body);
+        return json({ ok: true, usuario_id: uid, link, email_enviado: !link });
       }
       case "atualizar": {
         const id = String(body.usuario_id);
@@ -81,6 +90,14 @@ Deno.serve(async (req) => {
         await admin.auth.admin.updateUserById(id, { ban_duration: body.ativo === false ? "876000h" : "none" });
         if (id !== user.id) await gravarAcessos(id, body);
         return json({ ok: true });
+      }
+      case "link": {
+        // Link de acesso para enviar por mensagem: convite se ainda não entrou, senão redefinição de senha
+        const email = String(body.email ?? "").trim().toLowerCase();
+        let g = await admin.auth.admin.generateLink({ type: "invite", email, options: { redirectTo: body.redirectTo } });
+        if (g.error) g = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: body.redirectTo } });
+        if (g.error) return json({ erro: g.error.message }, 400);
+        return json({ ok: true, link: g.data.properties?.action_link });
       }
       case "reenviar": {
         const { error } = await admin.auth.resetPasswordForEmail(String(body.email), { redirectTo: body.redirectTo });

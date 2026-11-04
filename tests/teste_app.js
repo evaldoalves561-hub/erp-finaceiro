@@ -40,7 +40,7 @@ async function rotear(route){const req=route.request();const u=new URL(req.url()
   if(p==='/auth/v1/token'){const tok='eyJhbGciOiJIUzI1NiJ9.'+Buffer.from(JSON.stringify({sub:UID,exp:Math.floor(Date.now()/1e3)+3600})).toString('base64url')+'.x';return J({access_token:tok,token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1e3)+3600,refresh_token:'r',user})}
   if(p==='/auth/v1/user')return J(user);
   if(p==='/auth/v1/logout')return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}});
-  if(p==='/functions/v1/usuarios-admin'){const b=req.postDataJSON();log.push('fn:'+b.acao);if(b.acao==='listar')return J({usuarios});return J({ok:true})}
+  if(p==='/functions/v1/usuarios-admin'){const b=req.postDataJSON();log.push('fn:'+b.acao);if(b.acao==='listar')return J({usuarios});if(b.acao==='convidar')return J({ok:true,link:'https://vovomhtwqfnlidqlmycu.supabase.co/auth/v1/verify?token=abc&type=invite'});return J({ok:true})}
   if(p==='/functions/v1/indicadores')return J({selic:{valor:15,data:'05/11/2026'},igpm:{mes:-0.36,acum12:-1.2,data:'01/10/2026'},dolar:{valor:5.38,var:-0.4,data:'03/11/2026'}});
   if(p==='/rest/v1/rpc/criar_empresa'){const b=req.postDataJSON();const e={id:id(),cnpj:b.p_cnpj,razao_social:b.p_razao_social,nome_fantasia:b.p_nome_fantasia};empresas.push(e);log.push('rpc criar_empresa');return J(e.id)}
   const t=p.replace('/rest/v1/','');const tab=DB[t];if(!tab)return J({message:'tabela '+t},404);
@@ -83,7 +83,7 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.evaluate(()=>location.hash='contas');await pg.waitForTimeout(600);const bx=await pg.$('[data-acao=baixar]');if(bx){await bx.click();await pg.waitForTimeout(300);await shot(pg,'baixa');await pg.click('form[data-form=baixa] button:not([type=button])');await pg.waitForTimeout(600)}else errs.push('sem parcela para baixar');
     // usuários
     await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(600);await pg.click('[data-acao=convidar]');await pg.waitForTimeout(200);await shot(pg,'convite');
-    await pg.fill('#uNome','Bruno');await pg.fill('#uEmail','bruno@exemplo.com');await pg.check(`[data-up="${predios[2].id}"]`);await pg.click('form[data-form=usuario] button:not([type=button])');await pg.waitForTimeout(600);
+    await pg.fill('#uNome','Bruno');await pg.fill('#uEmail','bruno@exemplo.com');await pg.check(`[data-up="${predios[2].id}"]`);await pg.click('form[data-form=usuario] button:not([type=button])');await pg.waitForTimeout(600);await shot(pg,'link-acesso');
     // empresa nova
     await pg.evaluate(()=>location.hash='empresas');await pg.waitForTimeout(500);await pg.click('[data-acao=nova-empresa]');await pg.fill('#eCnpj','11.111.111/0001-11');await pg.fill('#eRazao','Teste SA');await pg.click('form[data-form=empresa] button:not([type=button])');await pg.waitForTimeout(800);
     // faturamento

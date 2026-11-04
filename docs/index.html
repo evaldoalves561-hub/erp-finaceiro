@@ -900,7 +900,7 @@ function formUsuario(uid){
       ${S.empresas.map(e=>`<label><input type="checkbox" data-ue="${e.id}" ${emps.has(e.id)?'checked':''}><b>${esc(nomeEmp(e))}</b></label>${S.predios.filter(p=>p.empresa_id===e.id).map(p=>`<label class="sub"><input type="checkbox" data-up="${p.id}" data-emp="${e.id}" ${preds.has(p.id)?'checked':''}>${esc(p.nome)}</label>`).join('')}`).join('')||'<span class="muted">Cadastre empresas primeiro.</span>'}
     </div><span class="muted" style="font-size:12px">Deixe os prédios desmarcados para liberar todos os prédios da empresa.</span></div>
     ${u?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" ${u.ativo?'checked':''}> Acesso ativo (desmarque para bloquear a entrada)</label>`:''}
-    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">${u?'Salvar':'Enviar convite'}</button>${u?`<button type="button" class="btn ghost" data-acao="reenviar" data-email="${esc(u.email)}">Reenviar e-mail de acesso</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">${u?'Salvar':'Enviar convite'}</button>${u?`<button type="button" class="btn ghost" data-acao="reenviar" data-email="${esc(u.email)}">Reenviar e-mail de acesso</button><button type="button" class="btn ghost" data-acao="gerar-link" data-email="${esc(u.email)}">Gerar link para WhatsApp</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
 }
 
 // ===================== Telas da próxima fase
@@ -1742,7 +1742,7 @@ const FORMS={
     const predios=[...f.querySelectorAll('[data-up]:checked')].filter(x=>empresas.includes(x.dataset.emp)).map(x=>x.dataset.up);
     const base={nome:f.nome.value.trim(),papel:f.papel.value,empresas,predios};
     if(f.dataset.uid){await chamarAdmin({acao:'atualizar',usuario_id:f.dataset.uid,ativo:f.ativo.checked,...base});toast('Acesso atualizado.')}
-    else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});toast('Convite enviado para '+f.email.value.trim()+'.')}
+    else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');const r=await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});if(r?.link){S.usuarios=null;mostrarLink(f.email.value.trim(),r.link,true);return}toast('Convite enviado para '+f.email.value.trim()+'.')}
     S.usuarios=null;fecharDrawer();render()},
 };
 Object.assign(FORMS,FORMS_FAT,FORMS_ORC,FORMS_FX);
@@ -1810,10 +1810,17 @@ document.addEventListener('click',async ev=>{
   else if(ACOES_FAT[a])await ACOES_FAT[a](b);
   else if(ACOES_ORC[a])await ACOES_ORC[a](b);
   else if(a==='limpar-fx'){S.fx={cc:new Set(),pf:new Set(),ct:new Set()};fecharDrawer();atualizaFxBtn();render()}
+  else if(a==='gerar-link'){b.disabled=true;const r=await chamarAdmin({acao:'link',email:b.dataset.email,redirectTo:BASE_URL});mostrarLink(b.dataset.email,r.link,false)}
+  else if(a==='copiar-link'){const t=document.getElementById('linkAcesso');try{await navigator.clipboard.writeText(t.value);toast('Link copiado.')}catch(e){t.select();toast('Selecionei o link: copie com o menu do celular.')}}
   else if(a==='reenviar'){b.disabled=true;await chamarAdmin({acao:'reenviar',email:b.dataset.email,redirectTo:BASE_URL});toast('E-mail de acesso reenviado para '+b.dataset.email+'.');b.disabled=false}
   }catch(err){console.error(err);toast(traduz(err));b.disabled=false}
 });
 addEventListener('hashchange',()=>{if(S.user){fecharDrawer();render()}});
 iniciar();
+</script>
+<script>
+function mostrarLink(email,link,novo){drawer(`<h3>Link de acesso · ${esc(email)}</h3><div class="effect">${novo?'O usuário foi cadastrado, mas o e-mail não pôde ser enviado (o servidor de e-mail ainda não está configurado). ':''}Envie este link para a pessoa pelo WhatsApp. Ao abrir, ela cria a própria senha. O link vale por 24 horas e funciona uma vez.</div>
+<div class="field wide"><label for="linkAcesso">Link</label><textarea id="linkAcesso" rows="4" readonly style="font-size:12px">${esc(link)}</textarea></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-acao="copiar-link">Copiar link</button><button class="btn ghost" data-acao="fechar">Fechar</button></div>`);render(true)}
 </script>
 </body></html>
