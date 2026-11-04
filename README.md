@@ -1,4 +1,4 @@
-# ERP Financeiro multiempresa
+# Gevans Gestor (ERP Financeiro) multiempresa
 
 App web (HTML + JavaScript) ligado ao Supabase: DRE, fluxo de caixa, contas a pagar e receber,
 lançamentos, plano de contas, empresas e prédios, importação de dados antigos por Excel e
