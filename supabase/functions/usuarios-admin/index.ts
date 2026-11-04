@@ -68,12 +68,16 @@ Deno.serve(async (req) => {
       case "convidar": {
         const email = String(body.email ?? "").trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ erro: "E-mail inválido." }, 400);
+        // libera o e-mail no gatilho "somente por convite" antes de criar o usuário
+        const { error: eConv } = await admin.from("convites_pendentes").upsert({ email });
+        if (eConv) return json({ erro: eConv.message }, 500);
         let novo = await admin.auth.admin.inviteUserByEmail(email, { data: { nome: body.nome }, redirectTo: body.redirectTo });
         let link: string | null = null;
         if (novo.error && /already|registered|exists/i.test(novo.error.message)) return json({ erro: "Este e-mail já tem cadastro." }, 400);
         if (novo.error) {
           // E-mail não saiu (ex.: SMTP padrão do Supabase só envia para a equipe): gera o link para enviar por WhatsApp
-          const g = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { nome: body.nome }, redirectTo: body.redirectTo } });
+          let g = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { nome: body.nome }, redirectTo: body.redirectTo } });
+          if (g.error) g = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: body.redirectTo } });
           if (g.error) return json({ erro: g.error.message }, 400);
           novo = { data: { user: g.data.user }, error: null } as typeof novo;
           link = g.data.properties?.action_link ?? null;
