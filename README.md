@@ -13,11 +13,15 @@ controle de usuários pela conta master.
   - `0002_ajustes_seguranca.sql` funções auxiliares fora da API e índices.
   - `0003_predios_bancos_conciliacao.sql` prédios, contas bancárias, extratos e importações.
   - `0004_usuarios_master.sql` conta master, perfis, cadastro só por convite, acesso por papel e por prédio, plano de contas padrão.
+  - `0008_pagamentos_cnab.sql` dados bancários do fornecedor, boleto na parcela, lotes de pagamento com aprovação e arquivos de remessa e retorno.
   - `0007_compras.sql` esteira de compras (pedido, confirmação, cotações, aprovação com verba do orçamento, compra, entrega) e ligação com estoque e contas a pagar.
 - `supabase/functions/usuarios-admin/` – função que a tela Usuários usa para convidar, alterar e desativar acessos (só a conta master).
 - `python/nfe/` – leitura do XML da NF-e e geração de parcelas pela premissa da conta.
   Testes: `cd python && python3 -m unittest tests/test_nfe.py -v`
 - `docs/compras.js` – módulo da esteira de compras e da tela de estoque (carregado pelo `index.html`).
+- `docs/pagamentos.js` – pagamentos a fornecedores por arquivo CNAB 240 (layout FEBRABAN): lote, aprovação, remessa e leitura do retorno (carregado pelo `compras.js`).
+- `tests/teste_cnab.js` – testes do gerador e do leitor CNAB 240: `node tests/teste_cnab.js`.
+- `tests/teste_pagamentos.js` – fluxo da tela de pagamentos com o Supabase simulado.
 - `tests/teste_app.js` – teste do app no navegador (Playwright) com um Supabase simulado.
 - `tests/teste_compras.js` – fluxo completo da esteira de compras com o mesmo Supabase simulado.
 

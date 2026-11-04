@@ -557,3 +557,5 @@ Object.assign(FORMS,FORMS_CMP);
 USA_EMP.add('compras');USA_EMP.add('estoque');
 if(S.user){renderNav(rota());render()}
 })();
+// pagamentos ao banco (CNAB) ficam em outro arquivo, carregado daqui para não mexer no index.html
+if(typeof document!=='undefined'&&!document.querySelector('script[src="pagamentos.js"]')){const s=document.createElement('script');s.src='pagamentos.js';document.body.appendChild(s)}
