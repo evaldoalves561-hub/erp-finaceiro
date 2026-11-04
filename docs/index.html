@@ -740,7 +740,9 @@ function validarLinha(o){
 }
 function carregarImport(rows,origem){
   const head=Object.keys(rows[0]||{});const falta=COLS_IMP.filter(c=>c[1]==='Sim'&&!head.some(h=>norm(h)===norm(c[0]))).map(c=>c[0]);
-  rows=rows.filter(r=>Object.values(r).some(v=>String(v??'').trim()!==''));
+  const campo=(r,n)=>{const h=head.find(h=>norm(h)===norm(n));return h!=null?String(r[h]??'').trim():''};
+  // linhas só com o CNPJ preenchido (modelo com 500 linhas prontas) não contam
+  rows=rows.filter(r=>['Data Competência','Conta Contábil','Valor','Descrição'].some(n=>campo(r,n)!==''));
   const lin=rows.map(r=>{const o={};COLS_IMP.forEach(c=>{const h=head.find(h=>norm(h)===norm(c[0]));o[c[0]]=h!=null?r[h]:''});return {o,...validarLinha(o)}});
   S.imp={origem,falta,lin,feito:false,progresso:''};
 }
