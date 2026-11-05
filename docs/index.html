@@ -287,6 +287,8 @@ const IC={
  empresas:'<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4"/>',
  tributos:'<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
  importar:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+ bancos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M10 10v8M14 10v8M19 10v8M3 21h18"/>',
+ salario:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/>',
  usuarios:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
 };
 const icone=(k,s=18)=>IC[k]?`<svg class="ic" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k]}</svg>`:'';
@@ -1746,15 +1748,214 @@ async function painelAcessos(){
 }
 </script>
 <script>
+// ===================== Contas bancárias, salário líquido (PF) e replicar lançamentos
+const BANCOS_BR=[['Nubank','260'],['Caixa Econômica Federal','104'],['Banco do Brasil','001'],['Itaú','341'],['Bradesco','237'],['Santander','033'],['Inter','077'],['C6 Bank','336'],['PicPay','380'],['Mercado Pago','323'],['Sicoob','756'],['Sicredi','748'],['BTG Pactual','208'],['Banrisul','041'],['Safra','422']];
+const addMes=(iso,n)=>{const [y,m,d]=iso.split('-').map(Number);const t=new Date(Date.UTC(y,m-1+n,1));const ult=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate();return t.toISOString().slice(0,8)+String(Math.min(d,ult)).padStart(2,'0')};
+const mesAno=iso=>MESES[+iso.slice(5,7)-1]+'/'+iso.slice(2,4);
+
+// ---------- Contas bancárias
+async function movBancos(){const ps=await todos(()=>sb.from('parcelas').select('conta_bancaria_id,valor,valor_pago,data_pagamento').eq('status','paga'));return ps.filter(p=>p.conta_bancaria_id)}
+async function vBancos(){
+  if(!S.empresas.length)return semEmpresa();
+  const emps=S.bancoEmp&&S.bancoEmp!=='*'?S.empresas.filter(e=>e.id===S.bancoEmp):S.empresas;
+  const ps=await movBancos();const mes=HOJE.slice(0,7);
+  const calc=b=>{const m=ps.filter(p=>p.conta_bancaria_id===b.id&&(!b.data_saldo_inicial||p.data_pagamento>=b.data_saldo_inicial)).map(p=>({v:+(p.valor_pago??p.valor),d:p.data_pagamento||''}));
+    const ent=sum(m.filter(x=>x.v>0).map(x=>x.v)),sai=sum(m.filter(x=>x.v<0).map(x=>x.v));
+    return {ent,sai,saldo:+b.saldo_inicial+ent+sai,entM:sum(m.filter(x=>x.v>0&&x.d.startsWith(mes)).map(x=>x.v)),saiM:sum(m.filter(x=>x.v<0&&x.d.startsWith(mes)).map(x=>x.v)),n:m.length}};
+  const bs=S.bancos.filter(b=>emps.some(e=>e.id===b.empresa_id));const C=Object.fromEntries(bs.map(b=>[b.id,calc(b)]));const at=bs.filter(b=>b.ativa!==false);
+  const tot=sum(at.map(b=>C[b.id].saldo)),entM=sum(at.map(b=>C[b.id].entM)),saiM=sum(at.map(b=>C[b.id].saiM));
+  const tiles=[['Saldo em conta',brl2.format(tot),`<span class="chip ${tot<0?'bad':'good'}">${tot<0?'negativo':'positivo'}</span>`,'saldo inicial + baixas registradas'],
+    ['Entradas em '+mesAno(HOJE),brl2.format(entM),'','recebimentos baixados no mês'],['Saídas em '+mesAno(HOJE),brl2.format(-saiM),'','pagamentos baixados no mês'],
+    ['Contas ativas',String(at.length),bs.length>at.length?`<span class="chip mute">${bs.length-at.length} inativa${bs.length-at.length>1?'s':''}</span>`:'',emps.length>1?emps.length+' empresas':esc(nomeEmp(emps[0]))]];
+  const ed=S.empresas.some(e=>podeEditar(e.id));
+  const maxAbs=Math.max(1,...at.map(b=>Math.abs(C[b.id].saldo)));
+  let rows='';emps.forEach(e=>{const lb=bs.filter(b=>b.empresa_id===e.id);if(!lb.length&&emps.length>1)return;
+    const te=sum(lb.filter(b=>b.ativa!==false).map(b=>C[b.id].saldo));
+    if(emps.length>1)rows+=`<tr class="grp-row"><td colspan="6"><span class="emp-cel">${seloEmp(e,20)} ${esc(nomeEmp(e))}</span></td><td class="n ${te<0?'neg':''}">${brl2.format(te)}</td><td></td></tr>`;
+    rows+=lb.length?lb.map(b=>{const c=C[b.id];const w=Math.round(Math.abs(c.saldo)/maxAbs*100);const pe=podeEditar(b.empresa_id);
+      return `<tr class="${pe?'click':''}" ${pe?`data-acao="editar-banco" data-id="${b.id}"`:''}><td><b>${esc(b.banco_nome)}</b>${b.banco_codigo?` <span class="chip mute mono">${esc(b.banco_codigo)}</span>`:''}<span class="unit">${b.predio_id?esc(predio(b.predio_id)?.nome||''):'empresa toda'}</span></td>
+      <td class="mono">${esc(b.agencia)}</td><td class="mono">${esc(b.conta)}</td><td class="n">${brl2.format(+b.saldo_inicial)}<span class="unit">${b.data_saldo_inicial?'em '+dataBR(b.data_saldo_inicial):'sem data'}</span></td>
+      <td class="n">${c.ent?brl2.format(c.ent):'–'}</td><td class="n">${c.sai?brl2.format(-c.sai):'–'}</td>
+      <td class="n"><div class="bar-cell" style="justify-content:flex-end"><span style="width:${Math.max(w*.6,2)}px;background:${c.saldo<0?'var(--bad)':'var(--accent)'}"></span><b class="${c.saldo<0?'neg':''}">${brl2.format(c.saldo)}</b></div></td>
+      <td>${b.ativa===false?'<span class="chip mute">Inativa</span>':'<span class="chip good">Ativa</span>'}</td></tr>`}).join(''):`<tr><td colspan="8" class="muted">Nenhuma conta cadastrada nesta empresa.</td></tr>`});
+  return `<div class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">${tiles.map(([l,v,c,s])=>`<div class="tile"><span class="lbl">${l}</span><span class="val">${v}</span><span class="cmp">${c}${s}</span></div>`).join('')}</div>
+  <div class="panel"><div class="ph"><div><h2>Contas bancárias</h2><p class="hint">O saldo atual soma o saldo inicial com as parcelas baixadas em cada conta. Clique numa conta para editar.</p></div>
+    <div class="ctrls"><select id="bancoEmp" aria-label="Empresa"><option value="*">Todas as empresas</option>${opcoesEmp(S.bancoEmp,false)}</select>${ed?'<button class="btn" data-acao="nova-conta-banc">Nova conta bancária</button>':''}</div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Banco</th><th>Agência</th><th>Conta</th><th class="n">Saldo inicial</th><th class="n">Entradas</th><th class="n">Saídas</th><th class="n">Saldo atual</th><th>Situação</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="muted">Nenhuma conta cadastrada.</td></tr>'}</tbody>
+    ${bs.length?`<tfoot><tr class="tot"><td colspan="6">Total das contas ativas</td><td class="n ${tot<0?'neg':''}">${brl2.format(tot)}</td><td></td></tr></tfoot>`:''}</table></div></div>`;
+}
+function formBanco(id,emp){
+  const b=id?S.bancos.find(x=>x.id===id):null;emp=b?b.empresa_id:(emp||(S.bancoEmp&&S.bancoEmp!=='*'?S.bancoEmp:(selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id)))?.id));
+  const preds=S.predios.filter(p=>p.empresa_id===emp);
+  drawer(`<h3>${b?'Editar conta bancária':'Nova conta bancária'}</h3><form data-form="banco" data-id="${b?.id||''}" data-emp="${emp}" class="form-grid">
+    ${b?'':`<div class="field wide"><label for="bEmp">Empresa</label><select id="bEmp" name="empresa" data-troca-banc>${opcoesEmp(emp)}</select></div>`}
+    <div class="field" style="grid-column:span 2"><label for="bNome">Banco</label><input id="bNome" name="banco" required list="dlBancos" autocomplete="off" placeholder="Nubank" value="${esc(b?.banco_nome||'')}"></div>
+    <div class="field"><label for="bCod">Código do banco</label><input id="bCod" name="codigo" inputmode="numeric" placeholder="260" value="${esc(b?.banco_codigo||'')}"></div>
+    <div class="field"><label for="bAg">Agência</label><input id="bAg" name="agencia" required value="${esc(b?.agencia||'')}"></div>
+    <div class="field"><label for="bCc">Conta</label><input id="bCc" name="conta" required value="${esc(b?.conta||'')}" placeholder="12345-6"></div>
+    <div class="field"><label for="bPred">Unidade</label><select id="bPred" name="predio"><option value="">Empresa toda</option>${preds.map(p=>`<option value="${p.id}" ${b?.predio_id===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label for="bSaldo">Saldo inicial</label><input id="bSaldo" name="saldo" inputmode="decimal" placeholder="0,00" value="${b?fmtIn(b.saldo_inicial):''}"></div>
+    <div class="field"><label for="bData2">Data do saldo inicial</label><input id="bData2" name="data" type="date" value="${b?.data_saldo_inicial||''}"></div>
+    ${b?`<label style="display:flex;gap:8px;align-items:center;align-self:end"><input type="checkbox" name="ativa" ${b.ativa!==false?'checked':''}> Conta ativa</label>`:''}
+    <datalist id="dlBancos">${BANCOS_BR.map(([n,c])=>`<option value="${esc(n)}">${c}</option>`).join('')}</datalist>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+}
+delete formsCad['novo-banco'];
+
+// ---------- Salário líquido (INSS e IRRF 2026)
+const INSS_2026=[[1621,.075],[2902.84,.09],[4354.27,.12],[8475.55,.14]];
+const IRRF_2026=[[2428.80,0,0],[2826.65,.075,182.16],[3751.05,.15,394.16],[4664.68,.225,675.49],[Infinity,.275,908.73]];
+const DEP_IR=189.59,SIMPLIFICADO=607.20;
+function calcINSS(b){let t=0,ant=0;const fx=[];for(const [lim,a] of INSS_2026){if(b>ant){const base=Math.min(b,lim)-ant;fx.push({de:ant,ate:Math.min(b,lim),a,base,v:base*a});t+=base*a}ant=lim}return {total:r2(t),fx}}
+function impTabela(base){const f=IRRF_2026.find(x=>base<=x[0]);return {f,v:Math.max(0,base*f[1]-f[2])}}
+function calcIR(bruto,inss,dep,simplOk=true){
+  const bLeg=Math.max(0,bruto-inss-dep*DEP_IR),bSim=Math.max(0,bruto-SIMPLIFICADO);
+  const iL=impTabela(bLeg),iS=impTabela(bSim);const usaS=simplOk&&iS.v<iL.v;const it=usaS?iS:iL;
+  const red=bruto<=5000?Math.min(it.v,312.89):bruto<=7350?Math.min(it.v,Math.max(0,978.62-0.133145*bruto)):0;
+  return {bLeg,bSim,usaS,base:usaS?bSim:bLeg,aliq:it.f[1],ded:it.f[2],tabela:r2(it.v),red:r2(red),total:r2(Math.max(0,it.v-red))}
+}
+function calcSalario(bruto,dep,outros){
+  const i=calcINSS(bruto),ir=calcIR(bruto,i.total,dep);const liq=r2(bruto-i.total-ir.total-outros);
+  const i13=calcINSS(bruto),ir13=calcIR(bruto,i13.total,dep,false);const p1=r2(bruto/2),p2=r2(bruto-p1-i13.total-ir13.total);
+  return {bruto,inss:i,ir,outros,liq,d13:{p1,p2,inss:i13.total,ir:ir13.total,liq:r2(p1+p2)}}
+}
+function stSal(){S.sal=S.sal||{};const s=S.sal;const eds=S.empresas;if(!eds.some(e=>e.id===s.emp))s.emp=(selEmp()[0]||eds[0])?.id;
+  if(s.bruto==null)s.bruto=0;if(s.dep==null)s.dep=0;if(s.outros==null)s.outros=0;if(s.de==null){s.ano=+HOJE.slice(0,4);s.de=+HOJE.slice(5,7)-1;s.ate=11;s.m1=10;s.m2=11;s.com13=true}return s}
+async function vSalario(){
+  if(!S.empresas.length)return semEmpresa();
+  const s=stSal();const R=calcSalario(s.bruto,s.dep,s.outros);const ed=podeEditar(s.emp);
+  const pc=v=>s.bruto?pct(v/s.bruto):'–';
+  const inp=(id,lbl,v,extra='')=>`<div class="field"><label for="${id}">${lbl}</label><input id="${id}" inputmode="decimal" value="${v?fmtIn(v):''}" ${extra}></div>`;
+  const cab=`<div class="panel"><div class="ph"><div><h2>Projeção de salário líquido</h2><p class="hint">Para pessoa física com carteira assinada. Cálculo pelas tabelas de 2026: INSS progressivo e IRRF com a redução da Lei 15.270/2025 (isenção até R$ 5.000).</p></div>
+    <div class="ctrls"><select id="salEmp" aria-label="Empresa">${opcoesEmp(s.emp,false)}</select></div></div>
+    <div class="form-grid f4" style="grid-template-columns:repeat(4,minmax(0,1fr))">${inp('salBruto','Salário bruto (R$)',s.bruto,'placeholder="5.900,00"')}<div class="field"><label for="salDep">Dependentes no IR</label><input id="salDep" type="number" min="0" max="20" value="${s.dep}"></div>${inp('salOutros','Outros descontos em folha (R$)',s.outros,'placeholder="0,00"')}
+    <div class="field" style="justify-content:flex-end"><button class="btn ghost" data-acao="sal-calcular">Calcular</button></div></div></div>`;
+  if(!s.bruto)return cab+vazio('Informe o salário bruto','<p style="margin:0">Digite o salário bruto acima para ver INSS, imposto de renda, líquido do mês e do 13º.</p>');
+  const tiles=[['Salário bruto',brl2.format(R.bruto),'','por mês'],['INSS',brl2.format(R.inss.total),`<span class="chip bad">${pc(R.inss.total)}</span>`,'desconto progressivo'],
+    ['Imposto de renda',brl2.format(R.ir.total),`<span class="chip ${R.ir.total?'bad':'good'}">${R.ir.total?pc(R.ir.total):'isento'}</span>`,R.ir.red?'já com redução de '+brl2.format(R.ir.red):'retido na fonte'],
+    ['Salário líquido',brl2.format(R.liq),`<span class="chip good">${pc(R.liq)} do bruto</span>`,''],['13º líquido',brl2.format(R.d13.liq),'',`${brl2.format(R.d13.p1)} + ${brl2.format(R.d13.p2)}`]];
+  const parts=[['Líquido',R.liq,'var(--accent)'],['INSS',R.inss.total,'var(--warn)'],['IRRF',R.ir.total,'var(--bad)'],['Outros descontos',R.outros,'var(--plan)']].filter(x=>x[1]>0);
+  const barra=`<div class="panel"><div class="ph"><div><h2>Para onde vai o salário bruto</h2><p class="hint">Composição de ${brl2.format(R.bruto)} por mês</p></div></div>
+    <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--surface-2)" role="img" aria-label="Composição do salário">${parts.map(([n,v,c])=>`<span title="${n}: ${brl2.format(v)}" style="width:${v/R.bruto*100}%;background:${c}"></span>`).join('')}</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px">${parts.map(([n,v,c])=>`<span style="display:flex;gap:6px;align-items:center"><i style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></i>${n} <b class="mono">${brl2.format(v)}</b> <span class="muted">${pc(v)}</span></span>`).join('')}</div></div>`;
+  const tInss=`<div class="panel"><h2>Memória de cálculo · INSS</h2><p class="hint">Cada faixa do salário paga a sua alíquota</p><div class="tbl-wrap"><table><thead><tr><th>Faixa</th><th class="n">Alíquota</th><th class="n">Base na faixa</th><th class="n">INSS</th></tr></thead><tbody>
+    ${R.inss.fx.map(f=>`<tr><td class="mono">${brl2.format(f.de)} a ${brl2.format(f.ate)}</td><td class="n">${pct(f.a)}</td><td class="n">${brl2.format(f.base)}</td><td class="n">${brl2.format(f.v)}</td></tr>`).join('')}
+    </tbody><tfoot><tr class="tot"><td colspan="3">Total do INSS${s.bruto>8475.55?' (teto de R$ 8.475,55)':''}</td><td class="n">${brl2.format(R.inss.total)}</td></tr></tfoot></table></div></div>`;
+  const I=R.ir;const tIr=`<div class="panel"><h2>Memória de cálculo · Imposto de renda</h2><p class="hint">Usa o desconto que der menos imposto: legal (INSS + dependentes) ou simplificado (R$ 607,20)</p><div class="tbl-wrap"><table><tbody>
+    <tr><td>Rendimento bruto</td><td class="n">${brl2.format(R.bruto)}</td></tr>
+    <tr class="${I.usaS?'muted':''}"><td>Base com desconto legal <span class="unit">bruto − INSS − ${s.dep} dependente${s.dep==1?'':'s'}</span></td><td class="n">${brl2.format(I.bLeg)}</td></tr>
+    <tr class="${I.usaS?'':'muted'}"><td>Base com desconto simplificado</td><td class="n">${brl2.format(I.bSim)}</td></tr>
+    <tr><td>Alíquota da faixa <span class="unit">parcela a deduzir ${brl2.format(I.ded)}</span></td><td class="n">${pct(I.aliq)}</td></tr>
+    <tr><td>Imposto pela tabela</td><td class="n">${brl2.format(I.tabela)}</td></tr>
+    <tr><td>(−) Redução Lei 15.270/2025 <span class="unit">${R.bruto<=5000?'zera o imposto até R$ 5.000':R.bruto<=7350?'R$ 978,62 − 0,133145 × bruto':'sem redução acima de R$ 7.350'}</span></td><td class="n">${I.red?'−'+brl2.format(I.red):'–'}</td></tr>
+    </tbody><tfoot><tr class="tot"><td>IRRF do mês</td><td class="n">${brl2.format(I.total)}</td></tr></tfoot></table></div></div>`;
+  const D=R.d13;const t13=`<div class="panel"><h2>13º salário em duas parcelas</h2><p class="hint">A 1ª parcela vem sem descontos. INSS e imposto de renda do 13º saem todos na 2ª parcela.</p><div class="tbl-wrap"><table><thead><tr><th>Parcela</th><th>Pagamento</th><th class="n">Bruto</th><th class="n">INSS</th><th class="n">IRRF</th><th class="n">Líquido</th></tr></thead><tbody>
+    <tr><td>1ª parcela</td><td>até 30/nov</td><td class="n">${brl2.format(D.p1)}</td><td class="n">–</td><td class="n">–</td><td class="n">${brl2.format(D.p1)}</td></tr>
+    <tr><td>2ª parcela</td><td>até 20/dez</td><td class="n">${brl2.format(R.bruto-D.p1)}</td><td class="n">${brl2.format(D.inss)}</td><td class="n">${brl2.format(D.ir)}</td><td class="n">${brl2.format(D.p2)}</td></tr>
+    </tbody><tfoot><tr class="tot"><td colspan="2">Total do 13º</td><td class="n">${brl2.format(R.bruto)}</td><td class="n">${brl2.format(D.inss)}</td><td class="n">${brl2.format(D.ir)}</td><td class="n">${brl2.format(D.liq)}</td></tr></tfoot></table></div></div>`;
+  // projeção do ano
+  const anoM=MESES.map((_,m)=>{const x={b:R.bruto,i:R.inss.total,r:R.ir.total,o:R.outros};if(s.com13&&m===s.m1)x.b+=D.p1;if(s.com13&&m===s.m2){x.b+=R.bruto-D.p1;x.i+=D.inss;x.r+=D.ir}x.l=x.b-x.i-x.r-x.o;return x});
+  const maxL=Math.max(...anoM.map(x=>x.l));
+  const proj=`<div class="panel"><div class="ph"><div><h2>Projeção do ano</h2><p class="hint">Líquido mês a mês, com o 13º em ${MESES[s.m1]} e ${MESES[s.m2]}. Total no ano: <b>${brl2.format(sum(anoM.map(x=>x.l)))}</b></p></div></div>
+    <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;align-items:end;height:120px;margin-bottom:6px" aria-hidden="true">${anoM.map((x,m)=>`<div title="${MESES[m]}: ${brl2.format(x.l)}" style="height:${Math.max(4,x.l/maxL*100)}%;background:${(s.com13&&(m===s.m1||m===s.m2))?'var(--good)':'var(--accent)'};border-radius:4px 4px 0 0"></div>`).join('')}</div>
+    <div class="tbl-wrap"><table class="grade"><thead><tr><th></th>${MESES.map(m=>`<th class="n">${m}</th>`).join('')}<th class="n">Ano</th></tr></thead><tbody>
+    ${[['Bruto','b',1],['(−) INSS','i',-1],['(−) IRRF','r',-1],...(R.outros?[['(−) Outros','o',-1]]:[]),['Líquido','l',1]].map(([n,kk,sg])=>`<tr class="${kk==='l'?'tot':''}"><td>${n}</td>${anoM.map(x=>`<td class="n ${sg<0?'neg':''}">${num.format(Math.round(x[kk]))}</td>`).join('')}<td class="n">${num.format(Math.round(sum(anoM.map(x=>x[kk]))))}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+  // lançar no orçamento
+  let orc='';
+  if(ed){const vs=(await versoesDe(s.emp)).filter(v=>!v.congelada);
+    const rec=S.contas.filter(c=>c.empresa_id===s.emp&&c.analitica&&c.ativa&&c.tipo==='receita'),des=S.contas.filter(c=>c.empresa_id===s.emp&&c.analitica&&c.ativa&&c.tipo==='despesa');
+    const achar=(lst,re)=>lst.find(c=>re.test(norm(c.nome)))?.id;
+    const op=(lst,sel,auto)=>`${auto?`<option value="">Criar “${auto}”</option>`:''}${lst.map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}`;
+    const mOp=sel=>MESES.map((m,i)=>`<option value="${i}" ${i===sel?'selected':''}>${m}</option>`).join('');
+    orc=`<div class="panel"><div class="ph"><div><h2>Lançar no orçamento</h2><p class="hint">Grava bruto, INSS e IRRF mês a mês numa versão em rascunho. Valores que já existirem nessas contas e meses são substituídos.</p></div></div>
+    ${vs.length?`<form data-form="sal-orc" class="form-grid f4" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+      <div class="field" style="grid-column:span 2"><label for="soVer">Versão do orçamento</label><select id="soVer" name="versao">${vs.map(v=>`<option value="${v.id}">${esc(v.nome)} · ${v.ano}</option>`).join('')}</select></div>
+      <div class="field"><label for="soDe">De</label><select id="soDe" name="de">${mOp(s.de)}</select></div><div class="field"><label for="soAte">Até</label><select id="soAte" name="ate">${mOp(s.ate)}</select></div>
+      <div class="field" style="grid-column:span 2"><label for="soSal">Conta do salário</label><select id="soSal" name="csal">${op(rec,achar(rec,/SALARIO/)||rec[0]?.id)}</select></div>
+      <div class="field" style="grid-column:span 2"><label for="so13">Conta do 13º</label><select id="so13" name="c13">${op(rec.filter(c=>c.id!==achar(rec,/^SALARIO/)),achar(rec,/13/),'13º salário')}</select></div>
+      <div class="field" style="grid-column:span 2"><label for="soInss">Conta do INSS</label><select id="soInss" name="cinss">${op(des,achar(des,/INSS/),'INSS sobre salário')}</select></div>
+      <div class="field" style="grid-column:span 2"><label for="soIr">Conta do IRRF</label><select id="soIr" name="cir">${op(des,achar(des,/IRRF|IMPOSTO DE RENDA/),'IRRF sobre salário')}</select></div>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="com13" ${s.com13?'checked':''}> Incluir 13º</label>
+      <div class="field"><label for="soM1">1ª parcela do 13º</label><select id="soM1" name="m1">${mOp(s.m1)}</select></div><div class="field"><label for="soM2">2ª parcela do 13º</label><select id="soM2" name="m2">${mOp(s.m2)}</select></div>
+      <div class="field" style="justify-content:flex-end"><button class="btn">Lançar no orçamento</button></div></form>`
+    :`<p class="muted" style="margin:0">Esta empresa não tem orçamento em rascunho. Crie uma versão em <a href="#orcamento">Orçamento e forecast</a> e volte aqui.</p>`}</div>`}
+  return cab+`<div class="grid g-tiles">${tiles.map(([l,v,c,x])=>`<div class="tile"><span class="lbl">${l}</span><span class="val">${v}</span><span class="cmp">${c}${x}</span></div>`).join('')}</div>`+barra+`<div class="grid g-2e">${tInss}${tIr}</div>`+t13+proj+orc+
+    `<p class="muted" style="font-size:12px;margin:0">Estimativa pelas tabelas vigentes em 2026 (Portaria MPS/MF nº 13/2026 e Lei 15.270/2025). Pensão alimentícia, previdência privada e outras deduções não entram. O holerite real pode variar alguns centavos por arredondamento.</p>`;
+}
+async function contaAuto(emp,nome,tipo,grupo){
+  const raiz=S.contas.find(c=>c.empresa_id===emp&&c.codigo==='3'&&!c.analitica);
+  const usados=new Set(S.contas.filter(c=>c.empresa_id===emp).map(c=>c.codigo));let n=1,cod;do{cod='3.09.'+String(n++).padStart(3,'0')}while(usados.has(cod));
+  const {data,error}=await sb.from('plano_contas').insert({empresa_id:emp,codigo:cod,nome,tipo,grupo_dre:grupo,analitica:true,ativa:true,conta_pai:raiz?.id||null}).select().single();if(error)throw error;S.contas.push(data);return data.id
+}
+
+// ---------- Replicar lançamento
+function perguntarReplicar(l,p){
+  const m=+l.competencia.slice(5,7);const pad=m<12?12-m:11;
+  const c=conta(l.conta_id);
+  drawer(`<h3>Lançamento salvo ✓</h3><div class="effect">Quer replicar este lançamento nos próximos meses? Útil para contas fixas como aluguel, plano de saúde, salário e parcelas de empréstimo.</div>
+  <div class="kv"><div><small>Conta</small><span>${esc(c?.codigo)} ${esc(c?.nome)}</span></div><div><small>Valor</small><span>${brl2.format(l.valor)}</span></div><div><small>Competência</small><span>${mesAno(l.competencia)}</span></div></div>
+  <form data-form="replicar" class="form-grid">
+    <div class="field"><label for="rN">Repetir por mais</label><select id="rN" name="n">${Array.from({length:36},(_,i)=>i+1).map(i=>`<option value="${i}" ${i===pad?'selected':''}>${i} ${i>1?'meses':'mês'}</option>`).join('')}</select></div>
+    <div class="field" style="grid-column:span 2"><label>Meses que serão criados</label><p id="rPrev" class="mono" style="margin:6px 0 0;font-size:12.5px"></p></div>
+    <p class="muted wide" style="margin:0;font-size:12.5px">As cópias entram em aberto, com vencimento no mesmo dia de cada mês. Depois é só dar baixa quando pagar ou receber.</p>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Replicar</button><button type="button" class="btn ghost" data-acao="fechar">Não, só este mês</button></div></form>`);
+  S._rep={l,p};prevReplicar();
+}
+function prevReplicar(){const el=document.getElementById('rPrev');const f=el?.closest('.sheet')?.querySelector('form');if(!el||!S._rep)return;const n=+f.n.value;const ds=Array.from({length:n},(_,i)=>mesAno(addMes(S._rep.l.competencia,i+1)));el.textContent=ds.length>8?ds.slice(0,4).join(', ')+' … '+ds.slice(-2).join(', '):ds.join(', ')}
+
+const FORMS_PF={
+  async banco(f){const s=parseValor(f.saldo.value);const emp=f.empresa?.value||f.dataset.emp;
+    const dados={banco_nome:f.banco.value.trim(),banco_codigo:f.codigo.value.trim()||null,agencia:f.agencia.value.trim(),conta:f.conta.value.trim(),predio_id:f.predio.value||null,saldo_inicial:isNaN(s)?0:r2(s),data_saldo_inicial:f.data.value||null};
+    if(f.dataset.id){dados.ativa=f.ativa.checked;const {error}=await sb.from('contas_bancarias').update(dados).eq('id',f.dataset.id);if(error)throw error}
+    else{const {error}=await sb.from('contas_bancarias').insert({...dados,empresa_id:emp});if(error)throw error}
+    fecharDrawer();toast(f.dataset.id?'Conta bancária atualizada.':'Conta bancária cadastrada.');await recarregarCad()},
+  async replicar(f){const R=S._rep;if(!R)return;const n=+f.n.value;const ls=[],ps=[];
+    for(let i=1;i<=n;i++){const id=uuid();const {id:_,criado_em,...base}=R.l;ls.push({...base,id,competencia:addMes(R.l.competencia,i)});
+      ps.push({...R.p,lancamento_id:id,vencimento:addMes(R.p.vencimento,i),data_pagamento:null,valor_pago:null,status:'aberta'})}
+    await lotes('lancamentos',ls);await lotes('parcelas',ps);S._rep=null;invalidar();await carregarAnos();fecharDrawer();toast(`Lançamento replicado em ${n} ${n>1?'meses':'mês'}.`);render()},
+  async 'sal-orc'(f){const s=stSal();const R=calcSalario(s.bruto,s.dep,s.outros);const emp=s.emp;
+    const v=(await versoesDe(emp)).find(x=>x.id===f.versao.value);if(!v||v.congelada)return toast('Escolha uma versão em rascunho.');
+    const de=+f.de.value,ate=+f.ate.value,com13=f.com13.checked,m1=+f.m1.value,m2=+f.m2.value;if(ate<de)return toast('O mês final precisa ser depois do inicial.');
+    Object.assign(s,{de,ate,com13,m1,m2});
+    const csal=f.csal.value;if(!csal)return toast('Escolha a conta do salário.');
+    const c13=com13?(f.c13.value||await contaAuto(emp,'13º salário','receita','receita_bruta')):null;
+    const cinss=f.cinss.value||await contaAuto(emp,'INSS sobre salário','despesa','deducoes');
+    const cir=f.cir.value||await contaAuto(emp,'IRRF sobre salário','despesa','deducoes');
+    const M={};const add=(c,m,x)=>{if(!x)return;const k_=c+'|'+m;M[k_]=r2((M[k_]||0)+x)};
+    for(let m=de;m<=ate;m++){add(csal,m,R.bruto);add(cinss,m,-R.inss.total);add(cir,m,-R.ir.total)}
+    if(com13){add(c13,m1,R.d13.p1);add(c13,m2,R.bruto-R.d13.p1);add(cinss,m2,-R.d13.inss);add(cir,m2,-R.d13.ir)}
+    const porConta={};Object.keys(M).forEach(k_=>{const [c,m]=k_.split('|');(porConta[c]=porConta[c]||[]).push(+m)});
+    for(const [c,ms] of Object.entries(porConta)){ms.sort((a,b)=>a-b);let ini=ms[0],ant=ms[0];for(const m of [...ms.slice(1),99]){if(m!==ant+1){const {error}=await sb.from('orcamento_linhas').delete().eq('versao_id',v.id).eq('conta_id',c).is('predio_id',null).gte('competencia',ym(v.ano,ini)+'-01').lte('competencia',ym(v.ano,ant)+'-01');if(error)throw error;ini=m}ant=m}}
+    await lotes('orcamento_linhas',Object.entries(M).map(([k_,x])=>{const [c,m]=k_.split('|');return {empresa_id:emp,versao_id:v.id,conta_id:c,predio_id:null,competencia:ym(v.ano,+m)+'-01',valor:x}}));
+    await linhasDe(v.id,true);S.orcEmp=emp;S.orcVer=v.id;S.orcEdit=null;toast(`Projeção lançada em “${v.nome}”.`);render(true)},
+};
+const ACOES_PF={
+  'nova-conta-banc':()=>formBanco(),
+  'editar-banco':b=>formBanco(b.dataset.id),
+  'novo-banco':b=>formBanco(null,b.dataset.emp),
+  'sal-calcular':()=>{lerSal();render(true)},
+};
+function lerSal(){const s=stSal();const g=id=>document.getElementById(id);if(g('salBruto')){const b=parseValor(g('salBruto').value);s.bruto=isNaN(b)?0:Math.max(0,b);s.dep=Math.max(0,parseInt(g('salDep').value)||0);const o=parseValor(g('salOutros').value);s.outros=isNaN(o)?0:Math.max(0,o)}}
+document.addEventListener('change',ev=>{const t=ev.target;
+  if(t.id==='bancoEmp'){S.bancoEmp=t.value;render(true)}
+  else if(['salBruto','salDep','salOutros'].includes(t.id)){lerSal();render(true)}
+  else if(t.id==='salEmp'){lerSal();S.sal.emp=t.value;render(true)}
+  else if(t.id==='rN')prevReplicar();
+  else if(t.hasAttribute?.('data-troca-banc')){const f=t.form;f.dataset.emp=t.value;f.predio.innerHTML=`<option value="">Empresa toda</option>${S.predios.filter(p=>p.empresa_id===t.value).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}`}});
+document.addEventListener('input',ev=>{const t=ev.target;if(t.id==='bNome'){const b=BANCOS_BR.find(([n])=>norm(n)===norm(t.value));if(b&&!t.form.codigo.value)t.form.codigo.value=b[1]}});
+document.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&['salBruto','salDep','salOutros'].includes(ev.target.id)){ev.preventDefault();lerSal();render(true)}});
+</script>
+<script>
 // ===================== navegação e filtros
 const ROTAS=[
  ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['lancamentos','Lançamentos'],
  ['g','Controle'],['auditoria','Auditoria de extratos',1],['nfs','Notas fiscais',1],['estoque','Estoque',1],
- ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],
- ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
+ ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],['salario','Salário líquido (PF)'],
+ ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['bancos','Contas bancárias'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas};
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario};
 const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','faturamento']);
 function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
 function renderNav(r){
@@ -1876,12 +2077,14 @@ const FORMS={
     let parcId=null;const pn=f.parceiro.value.trim();
     if(pn){const p=S.parceiros.find(x=>x.empresa_id===emp&&norm(x.nome)===norm(pn));if(p)parcId=p.id;else{const {data,error}=await sb.from('parceiros').insert({empresa_id:emp,nome:pn,cliente:v>0,fornecedor:v<0}).select('id,empresa_id,documento,nome').single();if(error)throw error;S.parceiros.push(data);parcId=data.id}}
     const id=uuid();
-    const {error}=await sb.from('lancamentos').insert({id,empresa_id:emp,predio_id:f.predio.value||null,conta_id:c.id,centro_custo_id:f.centro.value||null,parceiro_id:parcId,competencia:f.competencia.value,descricao:[f.documento.value.trim(),f.descricao.value.trim()].filter(Boolean).join(' · ')||null,valor:v});
+    const L={id,empresa_id:emp,predio_id:f.predio.value||null,conta_id:c.id,centro_custo_id:f.centro.value||null,parceiro_id:parcId,competencia:f.competencia.value,descricao:[f.documento.value.trim(),f.descricao.value.trim()].filter(Boolean).join(' · ')||null,valor:v};
+    const {error}=await sb.from('lancamentos').insert(L);
     if(error)throw error;
     const pago=f.pagamento.value;
-    const {error:e2}=await sb.from('parcelas').insert({empresa_id:emp,lancamento_id:id,numero:1,vencimento:f.vencimento.value||pago||f.competencia.value,valor:v,data_pagamento:pago||null,valor_pago:pago?v:null,forma_pagamento:f.forma.value.trim()||null,status:pago?'paga':'aberta',conta_bancaria_id:f.banco.value||null,centro_custo_id:f.centro.value||null});
+    const P={empresa_id:emp,lancamento_id:id,numero:1,vencimento:f.vencimento.value||pago||f.competencia.value,valor:v,data_pagamento:pago||null,valor_pago:pago?v:null,forma_pagamento:f.forma.value.trim()||null,status:pago?'paga':'aberta',conta_bancaria_id:f.banco.value||null,centro_custo_id:f.centro.value||null};
+    const {error:e2}=await sb.from('parcelas').insert(P);
     if(e2)throw e2;
-    invalidar();await carregarAnos();fecharDrawer();toast('Lançamento salvo.');render()},
+    invalidar();await carregarAnos();render();perguntarReplicar(L,P)},
   async baixa(f){const ab=await S.parcAbertas;const p=ab.find(x=>x.id===f.dataset.id);let v=parseValor(f.valor.value);if(isNaN(v)||!v)return toast('Informe o valor pago.');
     const {error}=await sb.from('parcelas').update({status:'paga',data_pagamento:f.data.value,valor_pago:r2(Math.abs(v)*Math.sign(p.valor)),conta_bancaria_id:f.banco.value||null,forma_pagamento:f.forma.value.trim()||null}).eq('id',p.id);
     if(error)throw error;invalidar();fecharDrawer();toast('Baixa registrada.');render()},
@@ -1904,7 +2107,7 @@ const FORMS={
     else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');const r=await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});if(r?.link){S.usuarios=null;mostrarLink(f.email.value.trim(),r.link,true);return}toast('Convite enviado para '+f.email.value.trim()+'.')}
     S.usuarios=null;fecharDrawer();render()},
 };
-Object.assign(FORMS,FORMS_FAT,FORMS_ORC,FORMS_FX,FORMS_MARCA);
+Object.assign(FORMS,FORMS_FAT,FORMS_ORC,FORMS_FX,FORMS_MARCA,FORMS_PF);
 // ===================== eventos
 document.addEventListener('submit',async ev=>{const f=ev.target;const fn=FORMS[f.dataset.form];if(!fn)return;ev.preventDefault();busy(f,true);
   try{await fn(f)}catch(err){console.error(err);toast(traduz(err))}finally{if(document.body.contains(f))busy(f,false)}});
@@ -1970,6 +2173,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='editar-usuario')formUsuario(b.dataset.uid);
   else if(ACOES_FAT[a])await ACOES_FAT[a](b);
   else if(ACOES_ORC[a])await ACOES_ORC[a](b);
+  else if(ACOES_PF[a])await ACOES_PF[a](b);
   else if(a==='limpar-fx'){S.fx={cc:new Set(),pf:new Set(),ct:new Set()};fecharDrawer();atualizaFxBtn();render()}
   else if(a==='gerar-link'){b.disabled=true;const r=await chamarAdmin({acao:'link',email:b.dataset.email,redirectTo:BASE_URL});mostrarLink(b.dataset.email,r.link,false)}
   else if(a==='copiar-link'){const t=document.getElementById('linkAcesso');try{await navigator.clipboard.writeText(t.value);toast('Link copiado.')}catch(e){t.select();toast('Selecionei o link: copie com o menu do celular.')}}
