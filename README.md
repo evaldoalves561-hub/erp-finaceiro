@@ -16,6 +16,9 @@ controle de usuários pela conta master.
 - `supabase/functions/usuarios-admin/` – função que a tela Usuários usa para convidar, alterar e desativar acessos (só a conta master).
 - `python/nfe/` – leitura do XML da NF-e e geração de parcelas pela premissa da conta.
   Testes: `cd python && python3 -m unittest tests/test_nfe.py -v`
+- Extratos e conciliação (menu Controle): importa extrato bancário em OFX, CSV ou PDF (layout do Nubank e layout comum
+  "data histórico valor"), confere com as baixas, dá baixa em contas em aberto, lança o que falta e aprende a conta do plano
+  pelo histórico (`regras_classificacao`). Leitor de PDF em `docs/vendor/pdf.min.js` (pdf.js 3.11.174), carregado só quando precisa.
 - `tests/teste_app.js` – teste do app no navegador (Playwright) com um Supabase simulado.
 
 ## Acesso
