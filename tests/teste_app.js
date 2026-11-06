@@ -92,6 +92,10 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     // novo lançamento
     await pg.evaluate(()=>location.hash='lancamentos');await pg.waitForTimeout(500);await pg.click('[data-acao=novo-lanc]');await pg.waitForTimeout(200);await shot(pg,'novo-lanc');
     await pg.selectOption('#lConta',{index:1});await pg.fill('#lValor','1.234,56');await pg.fill('#lParc','Fornecedor Novo');await pg.click('form[data-form=lanc] button:not([type=button])');await pg.waitForTimeout(800);
+    {const n0=lanc.length;await pg.waitForSelector('form[data-form=replicar]',{timeout:4000});await pg.selectOption('#rN','3');await shot(pg,'replicar');await pg.click('form[data-form=replicar] button:not([type=button])');await pg.waitForTimeout(900);if(lanc.length!==n0+3)errs.push('replicar: esperava +3, veio +'+(lanc.length-n0));const novos=lanc.slice(-3).map(l=>l.competencia).join(',');console.log('REPLICADOS',novos)}
+    {await pg.evaluate(()=>location.hash='lancamentos');await pg.waitForTimeout(700);const tr=await pg.$('tr[data-lanc]');const lid=await tr.getAttribute('data-lanc');await tr.click();await pg.waitForTimeout(500);await shot(pg,'lanc-detalhe');await pg.click('[data-acao=editar-lanc]');await pg.waitForTimeout(300);
+     await pg.fill('#lValor','777,77');await pg.fill('#lDesc','Editado no teste');await pg.fill('#lPag','2026-11-03');await shot(pg,'lanc-editar');await pg.click('form[data-form=lanc-edit] button:not([type=button])');await pg.waitForTimeout(900);
+     const L=lanc.find(x=>x.id===lid),P=parc.filter(x=>x.lancamento_id===lid);console.log('EDITADO',L.valor,L.descricao,JSON.stringify(P.map(x=>[x.valor,x.status,x.data_pagamento,x.valor_pago])));if(Math.abs(L.valor)!==777.77||L.descricao!=='Editado no teste')errs.push('edição do lançamento não salvou')}
     // baixa
     await pg.evaluate(()=>location.hash='contas');await pg.waitForTimeout(600);const bx=await pg.$('[data-acao=baixar]');if(bx){await bx.click();await pg.waitForTimeout(300);await shot(pg,'baixa');await pg.click('form[data-form=baixa] button:not([type=button])');await pg.waitForTimeout(600)}else errs.push('sem parcela para baixar');
     // usuários
@@ -122,6 +126,16 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.click('[data-ver="'+DB.orcamento_versoes[0].id+'"]');await pg.click('[data-orctab=caixa]');await pg.waitForTimeout(900);await shot(pg,'orc-caixa');
     await pg.evaluate(()=>location.hash='premissas');await pg.waitForTimeout(600);await pg.selectOption('#premEmp',empresas[0].id);await pg.waitForTimeout(400);await shot(pg,'premissas');await pg.click('[data-acao=editar-premissa]');await pg.waitForTimeout(200);await shot(pg,'premissa-form');
     await pg.fill('#pPrazos','30/60/90');await pg.click('form[data-form=premissa] button:not([type=button])');await pg.waitForTimeout(600);console.log('TOAST',await pg.evaluate(()=>[document.querySelector('.toast')?.textContent,typeof FORMS.premissa,!!document.querySelector('form[data-form=premissa]'),JSON.stringify(S.premissas.slice(0,1))]));
+    // contas bancárias
+    await pg.evaluate(()=>location.hash='bancos');await pg.waitForTimeout(900);await shot(pg,'bancos');
+    await pg.click('[data-acao=nova-conta-banc]');await pg.waitForTimeout(200);await pg.selectOption('#bEmp',empresas[0].id);await pg.fill('#bNome','Caixa Econômica Federal');await pg.dispatchEvent('#bNome','input');await pg.fill('#bAg','1234');await pg.fill('#bCc','00012345-6');await pg.fill('#bSaldo','2.500,00');await shot(pg,'banco-novo');
+    await pg.click('form[data-form=banco] button:not([type=button])');await pg.waitForTimeout(900);const cx=bancos.find(x=>x.banco_nome==='Caixa Econômica Federal');if(!cx||cx.banco_codigo!=='104'||cx.saldo_inicial!==2500)errs.push('banco novo errado '+JSON.stringify(cx));
+    await pg.click(`[data-acao=editar-banco][data-id="${cx.id}"]`);await pg.waitForTimeout(200);await pg.fill('#bCc','99999-0');await pg.click('form[data-form=banco] button:not([type=button])');await pg.waitForTimeout(900);if(cx.conta!=='99999-0')errs.push('edição do banco não salvou');await shot(pg,'bancos-depois');
+    // salário líquido
+    await pg.evaluate(()=>location.hash='salario');await pg.waitForTimeout(700);await pg.selectOption('#salEmp',empresas[0].id);await pg.waitForTimeout(500);await shot(pg,'salario-vazio');
+    await pg.fill('#salBruto','5.900,00');await pg.press('#salBruto','Enter');await pg.waitForTimeout(800);await shot(pg,'salario');
+    console.log('SAL',await pg.evaluate(()=>JSON.stringify(calcSalario(5900,0,0))),await pg.evaluate(()=>JSON.stringify(calcSalario(6000,0,0).ir)),await pg.evaluate(()=>JSON.stringify(calcSalario(4800,0,0).ir.total)));
+    {const n0=DB.orcamento_linhas.length;await pg.click('form[data-form=sal-orc] button:not([type=button])');await pg.waitForTimeout(1500);const nl=DB.orcamento_linhas.length-n0;console.log('SAL-ORC linhas',nl,DB.orcamento_linhas.slice(-4).map(l=>l.competencia+' '+l.valor).join(' ; '),'contas novas',plano.filter(c=>c.codigo.startsWith('3.09')).map(c=>c.codigo+' '+c.nome).join(', '))}
     // importação
     await pg.evaluate(()=>location.hash='importar');await pg.waitForTimeout(600);
     await pg.setInputFiles('#arqImp',{name:'antigos.csv',mimeType:'text/csv',buffer:Buffer.from(['CNPJ Empresa;Prédio;Data Competência;Data Vencimento;Data Pagamento;Conta Contábil;Centro de Custo;Produto/Serviço;Cliente/Fornecedor;CPF/CNPJ Parceiro;Documento;Descrição;Valor;Banco;Agência;Conta Corrente;Forma de Pagamento',
@@ -132,7 +146,8 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.waitForTimeout(600);await shot(pg,'import-conf');await pg.click('[data-acao=importar]');await pg.waitForTimeout(1500);await shot(pg,'import-feito');
   });
   await rodar({width:390,height:844},'mob',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForSelector('[data-entra]',{timeout:8000});await shot(pg,'m-entrada');await pg.click('[data-entra="*"]');await pg.waitForSelector('.tile',{timeout:8000});await shot(pg,'m-painel');await pg.evaluate(()=>location.hash='boletos');await pg.waitForTimeout(800);await shot(pg,'m-boletos');
-    for(const r of ['dre','usuarios','importar','orcamento','premissas']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}});
+    for(const r of ['dre','usuarios','importar','orcamento','premissas','bancos']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}
+    await pg.evaluate(()=>{location.hash='salario'});await pg.waitForTimeout(500);await pg.fill('#salBruto','5900');await pg.press('#salBruto','Enter');await pg.waitForTimeout(700);await shot(pg,'m-salario')});
   await b.close();srv.close();
   console.log('LOG',log.join(' | '));console.log('ORC',DB.orcamento_versoes.map(v=>v.nome+' '+v.tipo+' trav:'+v.congelada).join('; '),'linhas',DB.orcamento_linhas.length,'caixa',DB.orcamento_caixa.length,'premissa1',JSON.stringify(premissas[0].prazos_dias));console.log('ERROS',errs.length?errs.join('\n'):'nenhum');
   const novos=lanc.filter(l=>l.importacao_id);console.log('importados',novos.length,novos.map(l=>l.valor+' '+l.competencia+' cc:'+(centros.find(c=>c.id===l.centro_custo_id)?.nome)+' parc:'+(parceiros.find(p=>p.id===l.parceiro_id)?.nome)).join(' ; '));
