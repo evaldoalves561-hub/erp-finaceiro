@@ -7,8 +7,7 @@
  *
  * Como instalar (uma vez):
  *  1. Em script.google.com crie um projeto novo e cole este arquivo inteiro.
- *  2. Em "Serviços" (+), adicione "Drive API" (é usada para ler o texto dos PDFs).
- *  3. Escolha a função "instalar" e clique em Executar. Autorize o acesso pedido.
+ *  2. Escolha a função "instalar" e clique em Executar. Autorize o acesso pedido.
  * Pronto: ele verifica o e-mail a cada hora. Para parar, execute "desinstalar".
  */
 const CONFIG = {
@@ -80,13 +79,23 @@ function processar(m) {
 
 // Converte o PDF em Google Docs só para ler o texto, e apaga a cópia em seguida.
 function textoDoPdf(anexo) {
-  const arq = Drive.Files.create(
-    { name: 'gestor-boleto-temp', mimeType: 'application/vnd.google-apps.document' },
-    anexo.copyBlob(),
-    { ocrLanguage: 'pt' }
-  );
-  try { return DocumentApp.openById(arq.id).getBody().getText(); }
-  finally { try { Drive.Files.remove(arq.id); } catch (e) { DriveApp.getFileById(arq.id).setTrashed(true); } }
+  const limite = 'gestor' + Date.now();
+  const meta = { name: 'gestor-boleto-temp', mimeType: 'application/vnd.google-apps.document' };
+  const corpo = Utilities.newBlob('--' + limite + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(meta) +
+      '\r\n--' + limite + '\r\nContent-Type: application/pdf\r\n\r\n').getBytes()
+    .concat(anexo.copyBlob().getBytes())
+    .concat(Utilities.newBlob('\r\n--' + limite + '--').getBytes());
+  const auth = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  const r = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=pt', {
+    method: 'post', contentType: 'multipart/related; boundary=' + limite, payload: corpo, headers: auth, muteHttpExceptions: true,
+  });
+  if (r.getResponseCode() >= 300) throw new Error('Drive ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+  const id = JSON.parse(r.getContentText()).id;
+  try { return DocumentApp.openById(id).getBody().getText(); }
+  finally {
+    const d = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id, { method: 'delete', headers: auth, muteHttpExceptions: true });
+    if (d.getResponseCode() >= 300) DriveApp.getFileById(id).setTrashed(true);
+  }
 }
 
 // ---------- leitura do boleto ----------

@@ -688,7 +688,6 @@ function formBolConfig(empId){
   <ol style="margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px">
     <li>${tk?'Copie o script desta empresa':'Gere o código desta empresa'} no botão abaixo.</li>
     <li>Abra <a href="https://script.google.com/create" target="_blank" rel="noopener">script.google.com</a> com a conta do Gmail dos boletos, apague o que estiver lá e cole.</li>
-    <li>No menu da esquerda, em <b>Serviços</b> (+), adicione <b>Drive API</b>. Ela serve para ler o texto do PDF.</li>
     <li>No topo, escolha a função <b>instalar</b> e clique em <b>Executar</b>. Autorize o acesso que o Google pedir.</li></ol>
   <div style="display:flex;gap:8px;flex-wrap:wrap">${tk?`<button class="btn" data-acao="bol-script" data-emp="${emp.id}">Copiar script</button><button class="btn ghost" data-acao="bol-novo-codigo" data-emp="${emp.id}">Trocar código</button>`:`<button class="btn" data-acao="bol-gerar" data-emp="${emp.id}">Gerar código e copiar script</button>`}<button class="btn ghost" data-acao="fechar">Fechar</button></div>
   <textarea id="bolScript" rows="3" readonly hidden style="font-size:11px"></textarea>
