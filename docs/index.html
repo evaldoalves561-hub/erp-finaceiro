@@ -239,6 +239,17 @@ img.selo{background:#fff;padding:2px;box-sizing:border-box;border:1px solid var(
 .mini-side{background:var(--side);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:220px}
 .mini-side .brand b{color:#fff}
 .mini-nav{font-size:13px;color:#fff;background:var(--side-hi);border-radius:6px;padding:6px 10px;box-shadow:inset 3px 0 0 var(--emp)}
+.grp-row td{background:var(--surface-2);font-weight:700;font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
+.grp-row td .ic{vertical-align:-2px}
+.acc-lista{display:flex;flex-direction:column;gap:10px}
+.acc-emp{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.acc-emp:has([data-ue]:not(:checked))>:not(.acc-h){opacity:.45}
+.acc-h{display:flex;gap:8px;align-items:center;cursor:pointer}.acc-h input{accent-color:var(--accent);width:auto!important;flex:none}.acc-h{font-size:13.5px!important;color:var(--ink)!important}
+.checks.inline{flex-direction:row;flex-wrap:wrap;gap:6px 14px;max-height:none}
+table.mapa{font-size:11.5px}table.mapa th,table.mapa td{padding:4px 2px;text-align:center;min-width:22px}
+table.mapa th:first-child,table.mapa td:first-child{text-align:left;padding-right:10px;position:sticky;left:0;background:var(--surface);z-index:1;min-width:140px}
+table.mapa .fds{background:var(--surface-2)}table.mapa .hj{box-shadow:inset 0 -2px 0 var(--accent)}
+table.mapa i{display:block;height:16px;border-radius:3px;cursor:pointer}
 .ac-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
 .emp-cel{display:inline-flex;align-items:center;gap:6px}
 @media (max-width:640px){.ac-resumo{grid-template-columns:1fr}.boas{flex-direction:column;align-items:flex-start}}
@@ -369,8 +380,8 @@ const banco=id=>S.bancos.find(b=>b.id===id);
 const bancoTxt=b=>b?`${b.banco_nome} · ag ${b.agencia} · cc ${b.conta}`:'';
 const podeEditar=empId=>S.master||['admin','financeiro'].includes(S.papeis[empId]);
 const podeEditarAlguma=()=>S.master||Object.values(S.papeis).some(p=>p!=='leitura');
-// unidades = prédios + "sem prédio" de cada empresa (lançamentos sem prédio)
-function unidades(){return S.empresas.flatMap(e=>{const ps=S.predios.filter(p=>p.empresa_id===e.id);return ps.map(p=>({key:p.id,nome:p.nome,emp:e})).concat([{key:'e:'+e.id,nome:ps.length?'Sem prédio definido':'Empresa toda',emp:e,geral:true}])})}
+// unidades = unidades cadastradas (tabela predios) + "sem unidade" de cada empresa (lançamentos sem unidade)
+function unidades(){return S.empresas.flatMap(e=>{const ps=S.predios.filter(p=>p.empresa_id===e.id);return ps.map(p=>({key:p.id,nome:p.nome,emp:e})).concat([{key:'e:'+e.id,nome:ps.length?'Sem unidade definida':'Empresa toda',emp:e,geral:true}])})}
 const unidadeDe=(empId,predioId)=>predioId||('e:'+empId);
 const selUn=()=>unidades().filter(u=>S.sel.has(u.key));
 const selEmp=()=>S.empresas.filter(e=>unidades().some(u=>u.emp===e&&S.sel.has(u.key)));
@@ -404,6 +415,7 @@ async function carregarCadastros(){
   for(const r of [emp,pre,cc,bc,ue,pr,ic,ac,pm])if(r.error)throw r.error;
   S.empresas=emp.data;S.predios=pre.data;S.contas=ct;S.centros=cc.data;S.bancos=bc.data;S.parceiros=pa;S.produtos=pr.data;S.impostos=ic.data;S.acordos=ac.data;S.premissas=pm.data;S.versoes={};S.todasVer=null;S.linhasOrc={};S.caixaOrc={};
   S.papeis=Object.fromEntries(ue.data.map(x=>[x.empresa_id,x.papel]));
+  await carregarDeptos();
   const keys=new Set(unidades().map(u=>u.key));
   if(!S.sel.size||[...S.sel].some(k=>!keys.has(k)))S.sel=keys;else unidades().forEach(u=>{if(!S._conhecidas?.has(u.key))S.sel.add(u.key)});
   S._conhecidas=keys;
@@ -509,7 +521,7 @@ async function vPainel(){
   const recMes=MESES.map((_,i)=>dre(ano.filter(l=>filtroUn(l)&&l.competencia.slice(5,7)==String(i+1).padStart(2,'0'))).rb);
   const recAnt=MESES.map((_,i)=>dre(anoAnt.filter(l=>filtroUn(l)&&l.competencia.slice(5,7)==String(i+1).padStart(2,'0'))).rb);
   const hi=new Set(mesesDoPer().map(x=>+x.slice(5)-1));
-  // por empresa e prédio
+  // por empresa e unidade
   let comp='';
   selEmp().forEach(e=>{const us=selUn().filter(u=>u.emp===e);const de=dre(atual.filter(l=>l.empresa_id===e.id));
     comp+=`<tr class="grp-row"><td>${esc(nomeEmp(e))}</td><td class="n">${k(de.rb)}</td><td class="n">${pct(de.mb)}</td><td class="n">${k(de.eb)}</td><td class="n ${de.ll<0?'neg':''}">${k(de.ll)}</td><td class="n">${pct(de.ml)}</td><td class="n">${pct(de.rb/d.rb)}</td></tr>`;
@@ -527,7 +539,7 @@ async function vPainel(){
   alerts.push(['accent','#contas',`${sem.length} vencimento${sem.length===1?'':'s'} nos próximos 7 dias`,`${brl.format(-sum(sem.filter(p=>p.valor<0).map(p=>p.valor)))} a pagar · ${brl.format(sum(sem.filter(p=>p.valor>0).map(p=>p.valor)))} a receber`]);
   if(d.semGrupo)alerts.push(['warn','#plano','Lançamentos em contas sem grupo da DRE',brl.format(d.semGrupo)+' fora da DRE. Defina o grupo no plano de contas.']);
   const semPred=atual.filter(l=>!l.predio_id&&S.predios.some(p=>p.empresa_id===l.empresa_id));
-  if(semPred.length)alerts.push(['warn','#lancamentos',`${semPred.length} lançamento${semPred.length>1?'s':''} sem prédio`,'Ficam fora da visão por prédio.']);
+  if(semPred.length)alerts.push(['warn','#lancamentos',`${semPred.length} lançamento${semPred.length>1?'s':''} sem unidade`,'Ficam fora da visão por unidade.']);
   const ind=await faixaIndicadores();
   return ind+chipsFx()+`
   <section class="grid g-tiles">${tiles.map(t=>`<div class="tile"><div class="lbl">${t[0]}</div><div class="val">${t[1]}</div><div class="cmp">${t[2]}<span>${t[3]}</span></div></div>`).join('')}</section>
@@ -539,8 +551,8 @@ async function vPainel(){
       ${alerts.map(a=>`<a class="alert" href="${a[1]}" style="color:inherit;text-decoration:none"><span class="dot" style="background:var(--${a[0]})"></span><div><b>${a[2]}</b><small>${a[3]}</small></div></a>`).join('')}
     </div></div>
   </section>
-  <div class="panel"><div class="ph"><div><h2>Resultado por empresa e prédio</h2><p class="hint">${labelPer()} · regime de competência</p></div></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Empresa / prédio</th><th class="n">Receita bruta</th><th class="n">Margem bruta</th><th class="n">EBITDA</th><th class="n">Lucro líquido</th><th class="n">Margem líq.</th><th class="n">% da receita</th></tr></thead><tbody>${comp}</tbody></table></div></div>
+  <div class="panel"><div class="ph"><div><h2>Resultado por empresa e unidade</h2><p class="hint">${labelPer()} · regime de competência</p></div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Empresa / unidade</th><th class="n">Receita bruta</th><th class="n">Margem bruta</th><th class="n">EBITDA</th><th class="n">Lucro líquido</th><th class="n">Margem líq.</th><th class="n">% da receita</th></tr></thead><tbody>${comp}</tbody></table></div></div>
   <section class="grid g-2e">
     <div class="panel"><h2>Maiores despesas</h2><p class="hint">${labelPer()} · comparado com ${labelCurto(ant.a,ant.p)}</p>
       ${desp.length?`<div class="tbl-wrap"><table><thead><tr><th>Conta</th><th class="n">Valor</th><th></th><th class="n">Variação</th></tr></thead><tbody>
@@ -573,7 +585,7 @@ async function vDRE(){
       rows+=linhasArvore(arv,'dre|'+key,1,vals=>vals.map((x,i)=>cell(x,'')+(comp&&i>0?`<td class="n">${deltaChip(vals[0],x)}</td>`:'')).join('')+(comp?'':`<td class="n">${pct(vals[cols.findIndex(c=>c.tot)]/T.rl)}</td>`))}
   }
   return `<div class="panel"><div class="ph"><div><h2>Demonstração do resultado · ${labelPer()}</h2><p class="hint">Regime de competência · ${esc(escopo())} · clique em ▸ para abrir conta › subconta › centro de custo › fornecedor</p></div>
-    <div class="seg" role="group" aria-label="Visão da DRE"><button data-dre="mes" class="${S.dreModo==='mes'?'on':''}">Por mês</button><button data-dre="unid" class="${S.dreModo==='unid'?'on':''}">Por empresa e prédio</button><button data-dre="comp" class="${S.dreModo==='comp'?'on':''}">Comparativo</button></div></div>
+    <div class="seg" role="group" aria-label="Visão da DRE"><button data-dre="mes" class="${S.dreModo==='mes'?'on':''}">Por mês</button><button data-dre="unid" class="${S.dreModo==='unid'?'on':''}">Por empresa e unidade</button><button data-dre="comp" class="${S.dreModo==='comp'?'on':''}">Comparativo</button></div></div>
     ${chipsFx()}<div class="tbl-wrap"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>
     ${T.semGrupo?`<p class="chip warn" style="margin-top:10px;white-space:normal">${brl.format(T.semGrupo)} lançados em contas sem grupo da DRE não aparecem acima. Ajuste no plano de contas.</p>`:''}
     ${comp?'<p class="muted" style="font-size:12.5px;margin:10px 0 0">Variação: período atual contra o período anterior e contra o mesmo período do ano passado. Quando o orçamento for ativado, ele entra nesta comparação.</p>':''}</div>`;
@@ -631,7 +643,7 @@ async function vContas(){
     <div class="tile"><div class="lbl">Vence neste mês</div><div class="val">${tot(mes)}</div><div class="cmp">${MESES[+HOJE.slice(5,7)-1]}/${HOJE.slice(0,4)}</div></div></section>
   <div class="panel"><div class="ph"><div><h2>Parcelas em aberto</h2><p class="hint">${esc(escopo())} · todas as datas</p></div>
     <div class="seg" role="group" aria-label="Pagar ou receber"><button data-cp="pagar" class="${S.cpLado==='pagar'?'on':''}">A pagar</button><button data-cp="receber" class="${S.cpLado==='receber'?'on':''}">A receber</button></div></div>
-    ${lado.length?`<div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Situação</th><th>Parceiro / descrição</th><th>Conta</th><th>Empresa / prédio</th><th class="n">Valor</th><th></th></tr></thead><tbody>
+    ${lado.length?`<div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Situação</th><th>Parceiro / descrição</th><th>Conta</th><th>Empresa / unidade</th><th class="n">Valor</th><th></th></tr></thead><tbody>
     ${lado.slice(0,500).map(p=>{const [st,c]=statusParcela(p);const l=p.lancamentos;const ct=conta(l.conta_id);return `<tr><td class="mono">${dataBR(p.vencimento)}</td><td><span class="chip ${c}">${st}</span></td><td>${esc(parceiro(l.parceiro_id)?.nome||'')}<span class="unit">${esc(l.descricao||'')}${p.numero>1?' · parcela '+p.numero:''}</span></td><td>${esc(ct?.codigo)} ${esc(ct?.nome)}</td><td>${esc(nomeEmp(empresa(p.empresa_id)))}<span class="unit">${esc(predio(l.predio_id)?.nome||'')}</span></td><td class="n">${brl2.format(Math.abs(p.valor))}</td><td>${podeEditar(p.empresa_id)?`<button class="btn ghost" data-acao="baixar" data-id="${p.id}">${p.valor<0?'Pagar':'Receber'}</button>`:''}</td></tr>`}).join('')}
     </tbody></table></div>${lado.length>500?`<p class="muted">Mostrando as 500 primeiras de ${lado.length}.</p>`:''}`:'<p class="muted">Nenhuma parcela em aberto.</p>'}</div>`;
 }
@@ -748,14 +760,14 @@ async function vLancamentos(){
   return `<div class="panel"><div class="ph"><div><h2>Lançamentos · ${labelPer()}</h2><p class="hint">${esc(escopo())} · ${total} lançamentos${S.lancBusca?`, ${ls.length} na busca`:''}</p></div>
     <div class="ctrls"><input type="text" id="lancBusca" placeholder="Buscar descrição, parceiro, conta…" value="${esc(S.lancBusca)}" aria-label="Buscar lançamentos" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;background:var(--surface);min-width:0;width:240px;max-width:100%">
     ${podeEditarAlguma()?'<button class="btn ghost" data-acao="nova-transf">Transferência entre contas</button><button class="btn" data-acao="novo-lanc">Novo lançamento</button>':''}</div></div>
-    ${ls.length?`<div class="tbl-wrap"><table><thead><tr><th>Competência</th><th>Conta</th><th>Descrição / parceiro</th><th>Centro de custo</th><th>Empresa / prédio</th><th class="n">Valor</th></tr></thead><tbody>
+    ${ls.length?`<div class="tbl-wrap"><table><thead><tr><th>Competência</th><th>Conta</th><th>Descrição / parceiro</th><th>Centro de custo</th><th>Empresa / unidade</th><th class="n">Valor</th></tr></thead><tbody>
     ${ls.slice(0,400).map(l=>{const c=conta(l.conta_id);return `<tr class="click" data-lanc="${l.id}"><td class="mono">${dataBR(l.competencia)}</td><td>${esc(c?.codigo)} ${esc(c?.nome)}</td><td>${esc(l.descricao||'')}<span class="unit">${esc(parceiro(l.parceiro_id)?.nome||'')}</span></td><td>${esc(centro(l.centro_custo_id)?.nome||'')}</td><td>${esc(nomeEmp(empresa(l.empresa_id)))}<span class="unit">${esc(predio(l.predio_id)?.nome||'')}</span></td><td class="n ${l.valor<0?'neg':''}">${brl2.format(l.valor)}</td></tr>`}).join('')}
     </tbody></table></div>${ls.length>400?`<p class="muted">Mostrando 400 de ${ls.length}. Use a busca ou um período menor.</p>`:''}`:'<p class="muted">Nenhum lançamento encontrado.</p>'}</div>`;
 }
 const opcoesEmp=(sel,soEditaveis=true)=>S.empresas.filter(e=>!soEditaveis||podeEditar(e.id)).map(e=>`<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(nomeEmp(e))}</option>`).join('');
 function camposEmpresa(empId){
   const ps=S.predios.filter(p=>p.empresa_id===empId),cs=S.contas.filter(c=>c.empresa_id===empId&&c.analitica&&c.ativa),cc=S.centros.filter(c=>c.empresa_id===empId),bs=S.bancos.filter(b=>b.empresa_id===empId);
-  return {pred:`<option value="">Sem prédio</option>${ps.map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}`,
+  return {pred:`<option value="">Sem unidade</option>${ps.map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}`,
     contas:`<option value="">Escolha a conta…</option>${cs.map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}`,
     cc:`<option value="">Sem centro de custo</option>${cc.map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}`,
     bancos:`<option value="">Não informar</option>${bs.map(b=>`<option value="${b.id}">${esc(bancoTxt(b))}</option>`).join('')}`};
@@ -767,7 +779,7 @@ function formLanc(L,PS,pre={}){
   ${L&&L.origem&&L.origem!=='manual'?`<div class="effect">Este lançamento veio de ${L.origem==='faturamento'?'um faturamento':'uma importação'}. Lançamentos ligados a ele (taxa da maquininha, impostos) não mudam junto.</div>`:''}
   <form data-form="${L?'lanc-edit':'lanc'}" data-id="${L?.id||''}" class="form-grid">${pre.boleto?`<input type="hidden" name="boleto" value="${esc(pre.boleto)}">`:''}
     ${L?`<input type="hidden" name="empresa" value="${emp.id}"><div class="field wide"><label>Empresa</label><input value="${esc(nomeEmp(emp))}" readonly></div>`:`<div class="field wide"><label for="lEmp">Empresa</label><select id="lEmp" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>`}
-    <div class="field"><label for="lPred">Prédio</label><select id="lPred" name="predio">${f.pred}</select></div>
+    <div class="field"><label for="lPred">Unidade</label><select id="lPred" name="predio">${f.pred}</select></div>
     <div class="field"><label for="lComp">Competência</label><input id="lComp" name="competencia" type="date" required value="${esc(L?.competencia||pre.competencia||HOJE)}"></div>
     <div class="field"><label for="lValor">Valor (R$)</label><input id="lValor" name="valor" required inputmode="decimal" placeholder="1.250,00" value="${L?fmtIn(L.valor):pre.valor?fmtIn(Math.abs(pre.valor)):''}"></div>
     <div class="field wide"><label for="lConta">Conta do plano</label><select id="lConta" name="conta" required>${f.contas}</select></div>
@@ -794,7 +806,7 @@ async function abrirLanc(id){
   const c=conta(l.conta_id);S._lancAberto={l,ps:ps||[]};
   drawer(`<h3>${esc(l.descricao||c?.nome||'Lançamento')}</h3>
   <div class="kv"><div><small>Competência</small><span>${dataBR(l.competencia)}</span></div><div><small>Valor</small><span>${brl2.format(l.valor)}</span></div><div><small>Conta</small><span>${esc(c?.codigo)} ${esc(c?.nome)}</span></div>
-  <div><small>Empresa</small><span>${esc(nomeEmp(empresa(l.empresa_id)))}</span></div><div><small>Prédio</small><span>${esc(predio(l.predio_id)?.nome||'–')}</span></div><div><small>Centro de custo</small><span>${esc(centro(l.centro_custo_id)?.nome||'–')}</span></div>
+  <div><small>Empresa</small><span>${esc(nomeEmp(empresa(l.empresa_id)))}</span></div><div><small>Unidade</small><span>${esc(predio(l.predio_id)?.nome||'–')}</span></div><div><small>Centro de custo</small><span>${esc(centro(l.centro_custo_id)?.nome||'–')}</span></div>
   <div><small>Parceiro</small><span>${esc(parceiro(l.parceiro_id)?.nome||'–')}</span></div></div>
   <div><h2 style="font-size:14px;margin:0 0 6px">Parcelas</h2>${ps?.length?`<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vencimento</th><th>Situação</th><th>Pago em</th><th class="n">Valor</th><th>Conta bancária</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${p.numero}</td><td class="mono">${dataBR(p.vencimento)}</td><td>${p.status==='paga'?'<span class="chip good">Paga</span>':p.status==='cancelada'?'<span class="chip mute">Cancelada</span>':`<span class="chip ${statusParcela(p)[1]}">${statusParcela(p)[0]}</span>`}</td><td class="mono">${dataBR(p.data_pagamento)}</td><td class="n">${brl2.format(p.valor_pago??p.valor)}</td><td>${esc(bancoTxt(banco(p.conta_bancaria_id)))}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted" style="margin:0">Sem parcelas.</p>'}</div>
   ${podeEditar(l.empresa_id)?`<div style="display:flex;gap:8px"><button class="btn" data-acao="editar-lanc">Editar lançamento</button><button class="btn ghost" data-acao="excluir-lanc" data-id="${l.id}" style="color:var(--bad)">Excluir lançamento</button></div>`:''}`);
@@ -849,17 +861,17 @@ function formConta(id,paiNovo){
     <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button>${c&&!usos&&!filhos?`<button type="button" class="btn ghost" data-acao="excluir-conta" data-id="${c.id}" style="color:var(--bad);margin-left:auto">Excluir conta</button>`:''}</div></form>`);
 }
 
-// ===================== Empresas e prédios
+// ===================== Empresas e unidades
 function semEmpresa(){return S.master?vazio('Cadastre a primeira empresa','<p style="margin:0">Cada empresa nasce com um plano de contas padrão e quatro centros de custo, que você pode ajustar.</p>','<button class="btn" data-acao="nova-empresa">Nova empresa</button>'):vazio('Nenhuma empresa liberada','<p style="margin:0">Seu acesso ainda não tem empresas. Peça ao administrador para liberar.</p>')}
 function vEmpresas(){
   if(!S.empresas.length)return semEmpresa();
   return `${S.master?'<div style="display:flex;justify-content:flex-end"><button class="btn" data-acao="nova-empresa">Nova empresa</button></div>':''}
   ${S.empresas.map(e=>{const ed=podeEditar(e.id),ps=S.predios.filter(p=>p.empresa_id===e.id),bs=S.bancos.filter(b=>b.empresa_id===e.id),cc=S.centros.filter(c=>c.empresa_id===e.id);
   const ma=S.master||S.papeis[e.id]==='admin';
-  return `<div class="panel"><div class="ph"><div><h2 style="display:flex;align-items:center;gap:10px">${seloEmp(e,32)}${esc(e.razao_social)}</h2><p class="hint" style="margin:0">${esc(e.nome_fantasia||'')} · CNPJ <span class="mono">${esc(fmtCnpj(e.cnpj))}</span> · seu acesso: ${S.master?'master':esc({admin:'administrador',financeiro:'financeiro',leitura:'leitura'}[S.papeis[e.id]]||'')}</p></div>
-    ${ed||ma?`<div class="ctrls">${ma?`<button class="btn ghost" data-acao="marca-emp" data-emp="${e.id}">Identidade visual</button>`:''}${ed?`<button class="btn ghost" data-acao="novo-predio" data-emp="${e.id}">+ Prédio</button><button class="btn ghost" data-acao="novo-banco" data-emp="${e.id}">+ Conta bancária</button><button class="btn ghost" data-acao="novo-centro" data-emp="${e.id}">+ Centro de custo</button>`:''}</div>`:''}</div>
+  return `<div class="panel"><div class="ph"><div><h2 style="display:flex;align-items:center;gap:10px">${seloEmp(e,32)}${esc(e.razao_social)}</h2><p class="hint" style="margin:0">${esc(e.nome_fantasia||'')} · CNPJ <span class="mono">${esc(fmtCnpj(e.cnpj))}</span> · seu acesso: ${S.master?'master':esc({admin:'administrador',financeiro:'financeiro',rh:'RH',leitura:'leitura'}[S.papeis[e.id]]||'')}</p></div>
+    ${ed||ma?`<div class="ctrls">${ma?`<button class="btn ghost" data-acao="marca-emp" data-emp="${e.id}">Identidade visual</button>`:''}${ed?`<button class="btn ghost" data-acao="novo-predio" data-emp="${e.id}">+ Unidade</button><button class="btn ghost" data-acao="novo-banco" data-emp="${e.id}">+ Conta bancária</button><button class="btn ghost" data-acao="novo-centro" data-emp="${e.id}">+ Centro de custo</button>`:''}</div>`:''}</div>
     <div class="grid g-2e" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-      <div><b style="font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em">Prédios / unidades</b>${ps.length?`<table><tbody>${ps.map(p=>`<tr><td>${esc(p.nome)}<span class="unit">${esc(p.endereco||'')}</span></td></tr>`).join('')}</tbody></table>`:'<p class="muted" style="font-size:13px">Nenhum prédio. Os lançamentos ficam na empresa toda.</p>'}</div>
+      <div><b style="font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em">Unidades</b>${ps.length?`<table><tbody>${ps.map(p=>`<tr><td>${esc(p.nome)}<span class="unit">${esc(p.endereco||'')}</span></td></tr>`).join('')}</tbody></table>`:'<p class="muted" style="font-size:13px">Nenhuma unidade. Os lançamentos ficam na empresa toda.</p>'}</div>
       <div><b style="font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em">Contas bancárias</b>${bs.length?`<table><tbody>${bs.map(b=>`<tr><td>${esc(b.banco_nome)}<span class="unit">ag ${esc(b.agencia)} · cc ${esc(b.conta)}${b.predio_id?' · '+esc(predio(b.predio_id)?.nome||''):''}</span></td></tr>`).join('')}</tbody></table>`:'<p class="muted" style="font-size:13px">Nenhuma conta cadastrada.</p>'}</div>
       <div><b style="font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em">Centros de custo</b>${cc.length?`<table><tbody>${cc.map(c=>`<tr><td><span class="mono">${esc(c.codigo)}</span> ${esc(c.nome)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted" style="font-size:13px">Nenhum centro de custo.</p>'}</div>
     </div></div>`}).join('')}`;
@@ -870,14 +882,14 @@ const formsCad={
     <div class="field" style="grid-column:span 2"><label for="eRazao">Razão social</label><input id="eRazao" name="razao" required></div>
     <div class="field wide"><label for="eFant">Nome fantasia (aparece nos filtros)</label><input id="eFant" name="fantasia"></div>
     <div class="wide" style="display:flex;gap:8px"><button class="btn">Criar empresa</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`,
-  'novo-predio':emp=>`<h3>Novo prédio · ${esc(nomeEmp(empresa(emp)))}</h3><form data-form="predio" data-emp="${emp}" class="form-grid">
-    <div class="field wide"><label for="pNome">Nome do prédio ou unidade</label><input id="pNome" name="nome" required placeholder="Matriz · Santos"></div>
+  'novo-predio':emp=>`<h3>Nova unidade · ${esc(nomeEmp(empresa(emp)))}</h3><form data-form="predio" data-emp="${emp}" class="form-grid">
+    <div class="field wide"><label for="pNome">Nome da unidade</label><input id="pNome" name="nome" required placeholder="Matriz · Santos"></div>
     <div class="field wide"><label for="pEnd">Endereço</label><input id="pEnd" name="endereco"></div>
     <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`,
   'novo-banco':emp=>`<h3>Nova conta bancária · ${esc(nomeEmp(empresa(emp)))}</h3><form data-form="banco" data-emp="${emp}" class="form-grid">
     <div class="field"><label for="bNome">Banco</label><input id="bNome" name="banco" required placeholder="Itaú"></div>
     <div class="field"><label for="bCod">Código do banco</label><input id="bCod" name="codigo" placeholder="341"></div>
-    <div class="field"><label for="bPred">Prédio</label><select id="bPred" name="predio"><option value="">Empresa toda</option>${S.predios.filter(p=>p.empresa_id===emp).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label for="bPred">Unidade</label><select id="bPred" name="predio"><option value="">Empresa toda</option>${S.predios.filter(p=>p.empresa_id===emp).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select></div>
     <div class="field"><label for="bAg">Agência</label><input id="bAg" name="agencia" required></div>
     <div class="field"><label for="bCc">Conta corrente</label><input id="bCc" name="conta" required></div>
     <div class="field"><label for="bSaldo">Saldo inicial</label><input id="bSaldo" name="saldo" inputmode="decimal" placeholder="0,00"></div>
@@ -894,7 +906,7 @@ const formsCad={
 // ===================== Importação de dados antigos
 const COLS_IMP=[
  ['CNPJ Empresa','Sim','12.345.678/0001-90','Empresa precisa estar cadastrada'],
- ['Prédio','Não','Matriz · Santos','Nome do prédio cadastrado; em branco = empresa toda'],
+ ['Unidade','Não','Matriz · Santos','Nome da unidade cadastrada; em branco = empresa toda'],
  ['Data Competência','Sim','15/03/2024','Mês em que entra na DRE'],
  ['Data Vencimento','Não','15/04/2024','Gera a parcela'],
  ['Data Pagamento','Não','14/04/2024','Em branco = em aberto'],
@@ -926,9 +938,9 @@ function validarLinha(o){
   if(!e)erros.push('Empresa '+o['CNPJ Empresa']+' não cadastrada ou sem acesso');
   else{
     if(!podeEditar(e.id))erros.push('Sem permissão para gravar na '+nomeEmp(e));
-    const pn=String(o['Prédio']||'').trim();
-    if(pn){r.predio=S.predios.find(p=>p.empresa_id===e.id&&norm(p.nome)===norm(pn));if(!r.predio)erros.push(`Prédio “${pn}” não cadastrado na ${nomeEmp(e)}`)}
-    else if(S.predios.some(p=>p.empresa_id===e.id))avisos.push('Sem prédio: fica na empresa toda');
+    const pn=String(o['Unidade']??o['Prédio']??'').trim();
+    if(pn){r.predio=S.predios.find(p=>p.empresa_id===e.id&&norm(p.nome)===norm(pn));if(!r.predio)erros.push(`Unidade “${pn}” não cadastrada na ${nomeEmp(e)}`)}
+    else if(S.predios.some(p=>p.empresa_id===e.id))avisos.push('Sem unidade: fica na empresa toda');
     const cod=String(o['Conta Contábil']||'').trim();r.conta=S.contas.find(c=>c.empresa_id===e.id&&c.codigo===cod);
     if(!cod)erros.push('Falta a conta contábil');else if(!r.conta)erros.push('Conta '+cod+' não existe no plano da '+nomeEmp(e));else if(!r.conta.analitica)erros.push('Conta '+cod+' é sintética');
     const cc=String(o['Centro de Custo']||'').trim();
@@ -972,7 +984,7 @@ async function vImportar(){
    <div class="tbl-wrap"><table><thead><tr><th>Coluna</th><th>Obrigatória</th><th>Exemplo</th><th>Regra</th></tr></thead><tbody>
    ${COLS_IMP.map(c=>`<tr><td><b>${c[0]}</b></td><td>${c[1]==='Sim'?'<span class="chip info">Sim</span>':c[1]==='Se pago'?'<span class="chip warn">Se pago</span>':'<span class="muted">Não</span>'}</td><td class="mono">${esc(c[2])}</td><td class="muted">${esc(c[3])}</td></tr>`).join('')}
    </tbody></table></div></div>`;
-  const topo=`<div class="panel"><div class="audit-head"><div><h2>Importar lançamentos antigos por Excel</h2><p class="hint" style="margin-bottom:8px">Antes de gravar, o sistema confere cada linha contra os cadastros (empresas, prédios, plano de contas, contas bancárias) e mostra o que corrigir.</p>
+  const topo=`<div class="panel"><div class="audit-head"><div><h2>Importar lançamentos antigos por Excel</h2><p class="hint" style="margin-bottom:8px">Antes de gravar, o sistema confere cada linha contra os cadastros (empresas, unidades, plano de contas, contas bancárias) e mostra o que corrigir.</p>
      <a class="linkbtn" href="modelo_importacao.xlsx" download>Baixar planilha modelo</a></div>
      <label class="drop" for="arqImp" style="padding:12px 14px"><div><b>Enviar planilha</b><p>.xlsx ou .csv</p></div><span class="btn">Escolher arquivo</span><input type="file" id="arqImp" accept=".xlsx,.xls,.csv" hidden></label></div>
      ${S.imp?.falta?.length?`<p class="chip bad" style="margin-top:10px;white-space:normal">Faltam colunas obrigatórias: ${S.imp.falta.map(esc).join(', ')}</p>`:''}</div>`;
@@ -986,8 +998,8 @@ async function vImportar(){
     <div class="tile"><div class="lbl">Valor líquido</div><div class="val">${k(sum(ok.map(l=>l.valor)))}</div><div class="cmp">das linhas prontas</div></div></section>
   <div class="panel"><div class="ph"><div><h2>Conferência linha a linha</h2><p class="hint">Linhas com erro não são importadas. Corrija na planilha e envie de novo.</p></div>
     ${I.feito?'<span class="chip good">Importado</span>':I.progresso?`<span class="chip info">${esc(I.progresso)}</span>`:`<button class="btn" data-acao="importar" ${ok.length?'':'disabled'}>Importar ${ok.length} linhas prontas</button>`}</div>
-   <div class="tbl-wrap"><table><thead><tr><th>Linha</th><th>Situação</th><th>O que conferir</th><th>Empresa / prédio</th><th>Competência</th><th>Conta</th><th>Centro de custo</th><th>Parceiro</th><th class="n">Valor</th><th>Banco</th></tr></thead><tbody>
-   ${I.lin.slice(0,1000).map((l,i)=>{const o=l.o;return `<tr><td class="mono">${i+2}</td><td>${l.erros.length?'<span class="chip bad">Erro</span>':l.avisos.length?'<span class="chip warn">Aviso</span>':'<span class="chip good">OK</span>'}</td><td class="wrap">${[...l.erros.map(x=>`<span class="why" style="color:var(--bad)">${esc(x)}</span>`),...l.avisos.map(x=>`<span class="why">${esc(x)}</span>`)].join('')||'<span class="why">Tudo certo</span>'}</td><td>${esc(l.emp?nomeEmp(l.emp):o['CNPJ Empresa'])}<span class="unit">${esc(o['Prédio'])}</span></td><td class="mono">${esc(l.comp&&l.comp!=='invalida'?dataBR(l.comp):o['Data Competência'])}</td><td class="mono">${esc(o['Conta Contábil'])}</td><td>${esc(o['Centro de Custo'])}</td><td>${esc(o['Cliente/Fornecedor'])}</td><td class="n ${l.valor<0?'neg':''}">${isNaN(l.valor)?'':brl2.format(l.valor)}</td><td>${esc(o['Banco'])}<span class="unit">${o['Agência']?'ag '+esc(o['Agência'])+' · cc '+esc(o['Conta Corrente']):''}</span></td></tr>`}).join('')}
+   <div class="tbl-wrap"><table><thead><tr><th>Linha</th><th>Situação</th><th>O que conferir</th><th>Empresa / unidade</th><th>Competência</th><th>Conta</th><th>Centro de custo</th><th>Parceiro</th><th class="n">Valor</th><th>Banco</th></tr></thead><tbody>
+   ${I.lin.slice(0,1000).map((l,i)=>{const o=l.o;return `<tr><td class="mono">${i+2}</td><td>${l.erros.length?'<span class="chip bad">Erro</span>':l.avisos.length?'<span class="chip warn">Aviso</span>':'<span class="chip good">OK</span>'}</td><td class="wrap">${[...l.erros.map(x=>`<span class="why" style="color:var(--bad)">${esc(x)}</span>`),...l.avisos.map(x=>`<span class="why">${esc(x)}</span>`)].join('')||'<span class="why">Tudo certo</span>'}</td><td>${esc(l.emp?nomeEmp(l.emp):o['CNPJ Empresa'])}<span class="unit">${esc(o['Unidade'])}</span></td><td class="mono">${esc(l.comp&&l.comp!=='invalida'?dataBR(l.comp):o['Data Competência'])}</td><td class="mono">${esc(o['Conta Contábil'])}</td><td>${esc(o['Centro de Custo'])}</td><td>${esc(o['Cliente/Fornecedor'])}</td><td class="n ${l.valor<0?'neg':''}">${isNaN(l.valor)?'':brl2.format(l.valor)}</td><td>${esc(o['Banco'])}<span class="unit">${o['Agência']?'ag '+esc(o['Agência'])+' · cc '+esc(o['Conta Corrente']):''}</span></td></tr>`}).join('')}
    </tbody></table></div>${I.lin.length>1000?`<p class="muted">Mostrando 1.000 de ${I.lin.length} linhas na tela; todas são conferidas e importadas.</p>`:''}</div>`+histHtml+layout;
 }
 async function inserirLotes(tabela,linhas,tam=500){for(let i=0;i<linhas.length;i+=tam){const {error}=await sb.from(tabela).insert(linhas.slice(i,i+tam));if(error)throw error;if(S.imp){S.imp.progresso=`Gravando ${tabela}… ${Math.min(i+tam,linhas.length)}/${linhas.length}`;render(true)}}}
@@ -1031,48 +1043,10 @@ async function desfazerImport(id){
   invalidar();await carregarAnos();toast('Importação desfeita.');render();
 }
 
-// ===================== Usuários (somente master)
-const PAPEIS={admin:['Administrador','Lança, importa e cadastra prédios, contas e centros de custo'],financeiro:['Financeiro','Lança, importa e dá baixa em contas'],leitura:['Leitura','Só consulta relatórios e lançamentos']};
-async function vUsuarios(){
-  if(!S.master)return vazio('Acesso restrito','<p style="margin:0">Somente a conta master administra usuários.</p>');
-  if(!S.usuarios)S.usuarios=(await chamarAdmin({acao:'listar'})).usuarios;
-  const us=S.usuarios;
-  const sit=u=>!u.ativo?'<span class="chip bad">Desativado</span>':!u.convite_aceito?'<span class="chip warn">Convite enviado</span>':'<span class="chip good">Ativo</span>';
-  return `<div class="panel"><div class="ph"><div><h2>Usuários</h2><p class="hint">Convide pessoas por e-mail, escolha o papel e as empresas e prédios que cada uma enxerga. Só quem foi convidado consegue entrar.</p></div>
-    <button class="btn" data-acao="convidar">Convidar usuário</button></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Nome / e-mail</th><th>Papel</th><th>Empresas e prédios</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody>
-    ${us.map(u=>`<tr><td><b>${esc(u.nome||'')}</b><span class="unit">${esc(u.email)}</span></td>
-      <td>${u.master?'<span class="chip info">Master</span>':esc(PAPEIS[u.papel]?.[0]||u.papel)}</td>
-      <td class="wrap">${u.master?'<span class="muted">Todas</span>':u.empresas.length?u.empresas.map(id=>{const ps=u.predios.filter(p=>predio(p)?.empresa_id===id);return `${esc(nomeEmp(empresa(id))||'empresa removida')}<span class="unit">${ps.length?ps.map(p=>esc(predio(p)?.nome||'')).join(', '):'todos os prédios'}</span>`}).join(''):'<span class="chip warn">nenhuma empresa</span>'}</td>
-      <td>${sit(u)}</td><td class="mono">${u.ultimo_acesso?dataBR(u.ultimo_acesso.slice(0,10)):'–'}</td>
-      <td>${u.master?'':`<button class="btn ghost" data-acao="editar-usuario" data-uid="${u.usuario_id}">Editar</button>`}</td></tr>`).join('')}
-    </tbody></table></div></div>
-  ${await painelAcessos()}
-  <div class="panel"><h2>Como funcionam os papéis</h2><div class="tbl-wrap"><table><tbody>
-    <tr><td><span class="chip info">Master</span></td><td class="wrap">Você (${esc(MASTER_EMAIL)}). Vê todas as empresas, cria empresas e administra usuários.</td></tr>
-    ${Object.values(PAPEIS).map(p=>`<tr><td><b>${p[0]}</b></td><td class="wrap">${p[1]}</td></tr>`).join('')}
-    <tr><td><b>Prédios</b></td><td class="wrap">Sem prédio marcado, a pessoa vê todos os prédios das empresas liberadas. Marcando prédios, ela só vê os lançamentos desses prédios.</td></tr></tbody></table></div></div>`;
-}
-function formUsuario(uid){
-  const u=uid?S.usuarios.find(x=>x.usuario_id===uid):null;
-  const emps=new Set(u?.empresas||[]),preds=new Set(u?.predios||[]);
-  drawer(`<h3>${u?'Editar acesso de '+esc(u.nome||u.email):'Convidar usuário'}</h3>
-  ${u?'':'<p class="muted" style="margin:0">A pessoa recebe um e-mail com um link para criar a senha e entrar.</p>'}
-  <form data-form="usuario" data-uid="${uid||''}" class="form-grid">
-    <div class="field"><label for="uNome">Nome</label><input id="uNome" name="nome" value="${esc(u?.nome||'')}" ${u?'':'required'}></div>
-    <div class="field" style="grid-column:span 2"><label for="uEmail">E-mail</label><input id="uEmail" name="email" type="email" required value="${esc(u?.email||'')}" ${u?'readonly':''}></div>
-    <div class="field wide"><label for="uPapel">Papel</label><select id="uPapel" name="papel">${Object.entries(PAPEIS).map(([v,p])=>`<option value="${v}" ${(u?.papel||'financeiro')===v?'selected':''}>${p[0]} · ${p[1]}</option>`).join('')}</select></div>
-    <div class="field wide"><label>Empresas e prédios liberados</label><div class="checks">
-      ${S.empresas.map(e=>`<label><input type="checkbox" data-ue="${e.id}" ${emps.has(e.id)?'checked':''}><b>${esc(nomeEmp(e))}</b></label>${S.predios.filter(p=>p.empresa_id===e.id).map(p=>`<label class="sub"><input type="checkbox" data-up="${p.id}" data-emp="${e.id}" ${preds.has(p.id)?'checked':''}>${esc(p.nome)}</label>`).join('')}`).join('')||'<span class="muted">Cadastre empresas primeiro.</span>'}
-    </div><span class="muted" style="font-size:12px">Deixe os prédios desmarcados para liberar todos os prédios da empresa.</span></div>
-    ${u?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" ${u.ativo?'checked':''}> Acesso ativo (desmarque para bloquear a entrada)</label>`:''}
-    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">${u?'Salvar':'Enviar convite'}</button>${u?`<button type="button" class="btn ghost" data-acao="reenviar" data-email="${esc(u.email)}">Reenviar e-mail de acesso</button><button type="button" class="btn ghost" data-acao="gerar-link" data-email="${esc(u.email)}">Gerar link para WhatsApp</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
-}
-
 // ===================== Telas da próxima fase
 const EM_BREVE={
   nfs:['Notas fiscais','Entrada de notas por e-mail automático, foto e XML. Nota de estoque gera a entrada no estoque e as parcelas de pagamento.'],
-  estoque:['Estoque','Saldo por produto e prédio, custo médio, mínimo e movimentações vindas das notas.'],
+  estoque:['Estoque','Saldo por produto e unidade, custo médio, mínimo e movimentações vindas das notas.'],
 };
 function vEmBreve(r){const [t,txt]=EM_BREVE[r];return vazio(t+' · próxima fase',`<p style="margin:0 auto;max-width:60ch">${txt}</p><p class="muted" style="margin:8px 0 0">O banco de dados já tem as tabelas desta tela. Enquanto ela é construída, veja como vai ficar no protótipo.</p>`,`<a class="btn ghost" href="${PROTOTIPO}" target="_blank" rel="noopener">Ver no protótipo</a>`)}
 </script>
@@ -1135,7 +1109,7 @@ async function dadosFat(ano){
   }
   return {ls,emp};
 }
-// valor de impostos por mês na seleção (rateado pela participação dos prédios marcados no faturamento da empresa)
+// valor de impostos por mês na seleção (rateado pela participação das unidades marcadas no faturamento da empresa)
 function impostosMes(D,filtro){const out=Array(12).fill(0);Object.values(D.emp).forEach(x=>x.rows.filter(filtro).forEach(r=>r.dist.forEach((v,m)=>out[m]+=v*x.share[m])));return out}
 
 function chartStack({labels,series,hi,total}){
@@ -1201,7 +1175,7 @@ async function vFaturamento(){
       <div class="tbl-wrap"><table><thead><tr><th>Forma</th><th class="n">Vendas</th><th class="n">Bruto</th><th class="n">% do total</th><th class="n">Taxa</th><th class="n">Taxa %</th></tr></thead><tbody>
       ${formas.map(([f,o])=>`<tr><td>${esc(FORMAS[f]||'Não informado')}</td><td class="n">${o.n}</td><td class="n">${num.format(Math.round(o.v))}</td><td class="n">${pct(o.v/bruto)}</td><td class="n">${o.t?num.format(Math.round(o.t)):'–'}</td><td class="n">${o.t?pct(o.t/o.v):'–'}</td></tr>`).join('')}
       <tr class="tot"><td>Total</td><td class="n">${fatL.length}</td><td class="n">${num.format(Math.round(bruto))}</td><td class="n">100,0%</td><td class="n">${num.format(Math.round(taxas))}</td><td class="n">${pct(taxas/bruto)}</td></tr></tbody></table></div></div>
-    <div class="panel"><h2>Por empresa</h2><p class="hint">${labelPer()} · impostos pelo regime de cada CNPJ${S.sel.size<unidades().length?', rateados pelos prédios marcados':''}</p>
+    <div class="panel"><h2>Por empresa</h2><p class="hint">${labelPer()} · impostos pelo regime de cada CNPJ${S.sel.size<unidades().length?', rateados pelas unidades marcadas':''}</p>
       <div class="tbl-wrap"><table><thead><tr><th>Empresa</th><th class="n">Bruto</th><th class="n">Impostos</th><th class="n">Efetivo</th><th class="n">IRPJ/CSLL</th><th class="n">Taxas</th></tr></thead><tbody>
       ${porEmp.map(x=>`<tr><td>${esc(nomeEmp(x.e))}<span class="unit">${esc(REGIMES[x.e.regime_tributario]||'regime não definido')}</span></td><td class="n">${num.format(Math.round(x.b))}</td><td class="n">${num.format(Math.round(x.im))}</td><td class="n">${pct(x.im/x.b)}</td><td class="n">${num.format(Math.round(x.i2)||0)}</td><td class="n">${num.format(Math.round(x.tx)||0)}</td></tr>`).join('')}</tbody></table></div></div>
   </section>
@@ -1321,7 +1295,7 @@ function formFat(){
   drawer(`<h3>Registrar faturamento</h3><p class="muted" style="margin:0">Entra na DRE pela data de emissão da NF. Os impostos são calculados sobre ele e vão para a agenda de impostos.</p>
   <form data-form="fat" class="form-grid">
     <div class="field wide"><label for="fEmp2">Empresa</label><select id="fEmp2" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>
-    <div class="field"><label for="fPred2">Prédio</label><select id="fPred2" name="predio">${f.pred}</select></div>
+    <div class="field"><label for="fPred2">Unidade</label><select id="fPred2" name="predio">${f.pred}</select></div>
     <div class="field"><label for="fEmi">Emissão da NF</label><input id="fEmi" name="emissao" type="date" required value="${HOJE}"></div>
     <div class="field"><label for="fNf">Número da NF</label><input id="fNf" name="nf"></div>
     <div class="field wide"><label for="fConta">Conta de receita</label><select id="fConta" name="conta" required>${contasRec.map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}</select></div>
@@ -1481,8 +1455,8 @@ async function abaEditar(emp,v,ed){
     const vals=MESES.map((_,m)=>val(c,m));vals.forEach((x,m)=>totMes[m]+=x);
     rows+=`<tr><td style="padding-left:18px">${esc(c.codigo)} ${esc(c.nome)}</td>${vals.map((x,m)=>{const fixo=!edita||m<corte;return `<td class="n" style="padding:3px 4px">${fixo?`<span class="${m<corte?'muted':''}">${x?num.format(Math.round(Math.abs(x))):''}</span>`:`<input class="cel" data-cel="${c.id}|${m}" data-r="${ri}" data-m="${m}" inputmode="decimal" value="${fmtIn(x)}" aria-label="${esc(c.nome)} ${MESES[m]}">`}</td>`}).join('')}<td class="n" data-tot="${c.id}">${num.format(Math.round(Math.abs(sum(vals))))}</td>${edita?`<td><button class="linkbtn small" data-acao="repetir" data-cid="${c.id}" title="Repetir o primeiro mês editável nos seguintes">→</button></td>`:''}</tr>`});
   rows+=`<tr class="tot"><td>Resultado</td>${totMes.map(x=>`<td class="n ${x<0?'neg':''}">${num.format(Math.round(x))}</td>`).join('')}<td class="n ${sum(totMes)<0?'neg':''}">${num.format(Math.round(sum(totMes)))}</td>${edita?'<td></td>':''}</tr>`;
-  return `<div class="ph" style="margin-top:6px"><div><p class="hint" style="margin:0">${pred==='*'&&!v.congelada&&ed?'Visão consolidada, só leitura. Escolha um prédio, ou “Sem prédio”, para editar os valores. ':''}${v.congelada?`Travado em ${dataBR(String(v.congelada_em||'').slice(0,10))}. Não pode mais ser alterado: para revisar, crie um forecast a partir dele.`:'Digite valores positivos: o sinal vem do tipo da conta. Pode colar um bloco do Excel numa célula.'}${corte?` Meses até ${MESES[corte-1]} trazem o realizado e ficam fixos.`:''}</p></div>
-    <div class="ctrls">${ps.length?`<select id="orcPredio" aria-label="Prédio"><option value="*" ${pred==='*'?'selected':''}>Todos os prédios (consolidado)</option><option value="" ${pred===''?'selected':''}>Sem prédio (empresa)</option>${ps.map(p=>`<option value="${p.id}" ${pred===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select>`:''}
+  return `<div class="ph" style="margin-top:6px"><div><p class="hint" style="margin:0">${pred==='*'&&!v.congelada&&ed?'Visão consolidada, só leitura. Escolha uma unidade, ou “Sem unidade”, para editar os valores. ':''}${v.congelada?`Travado em ${dataBR(String(v.congelada_em||'').slice(0,10))}. Não pode mais ser alterado: para revisar, crie um forecast a partir dele.`:'Digite valores positivos: o sinal vem do tipo da conta. Pode colar um bloco do Excel numa célula.'}${corte?` Meses até ${MESES[corte-1]} trazem o realizado e ficam fixos.`:''}</p></div>
+    <div class="ctrls">${ps.length?`<select id="orcPredio" aria-label="Unidade"><option value="*" ${pred==='*'?'selected':''}>Todas as unidades (consolidado)</option><option value="" ${pred===''?'selected':''}>Sem unidade (empresa)</option>${ps.map(p=>`<option value="${p.id}" ${pred===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select>`:''}
     ${edita?`<button class="btn ghost" data-acao="excluir-versao" data-id="${v.id}" style="color:var(--bad)">Excluir rascunho</button><button class="btn ghost" data-acao="travar-versao" data-id="${v.id}">Travar</button><button class="btn" data-acao="salvar-orc" ${S.orcEdit.sujo?'':'disabled'}>Salvar alterações</button>`:''}</div></div>
     <div class="tbl-wrap" style="max-height:70vh;overflow:auto"><table class="grade"><thead><tr><th>Conta</th>${MESES.map(m=>`<th class="n">${m}/${String(v.ano).slice(2)}</th>`).join('')}<th class="n">Total</th>${edita?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -1764,7 +1738,7 @@ function seloEmp(e,tam=30){
   if(e?.logo)return `<img class="selo" src="${esc(e.logo)}" alt="" style="width:${tam}px;height:${tam}px">`;
   return `<span class="selo" style="width:${tam}px;height:${tam}px;background:${corEmp(e)};font-size:${Math.round(tam*.38)}px">${esc(iniciais(e?.nome||nomeEmp(e)))}</span>`;
 }
-const papelTxt=id=>S.master?'master':({admin:'Administrador',financeiro:'Financeiro',leitura:'Leitura'}[S.papeis[id]]||'');
+const papelTxt=id=>S.master?'master':({admin:'Administrador',financeiro:'Financeiro',rh:'RH',leitura:'Leitura'}[S.papeis[id]]||'');
 const primeiroNome=()=>String(S.perfil?.nome||S.user?.email||'').split(/[\s@]/)[0];
 function dispositivo(){const u=navigator.userAgent;const t=/iPad|Tablet/i.test(u)?'Tablet':/Mobi|Android|iPhone/i.test(u)?'Celular':'Computador';
   const n=/Edg\//.test(u)?'Edge':/OPR\//.test(u)?'Opera':/Chrome\//.test(u)?'Chrome':/Firefox\//.test(u)?'Firefox':/Safari\//.test(u)?'Safari':'navegador';
@@ -1807,7 +1781,7 @@ function escolherEmpresa(trocando){
   const op=(id,selo,nome,info,marca)=>`<button class="emp-op" data-entra="${id}" style="--c:${marca}">${selo}<span class="emp-tx"><b>${esc(nome)}</b><small>${info}</small></span>${ult===id?'<span class="chip info">último acesso</span>':''}<span class="emp-seta" aria-hidden="true">›</span></button>`;
   a.innerHTML=`<div class="auth-card entrada largo">${topo}<div><p class="ola">Olá, ${esc(primeiroNome())}</p><h1>${trocando?'Trocar de empresa':'Em qual empresa você vai trabalhar?'}</h1></div>
     <div class="emp-lista">${es.map(e=>op(e.id,seloEmp(e,40),nomeEmp(e),`CNPJ <span class="mono">${esc(fmtCnpj(e.cnpj))}</span> · ${esc(papelTxt(e.id))}`,corEmp(e))).join('')}
-    ${es.length>1?op('*',`<span class="selo" style="width:40px;height:40px;background:var(--side);font-size:15px">${es.length}</span>`,'Todas as empresas','Visão consolidada · '+S.predios.length+' prédios','var(--side)'):''}</div>
+    ${es.length>1?op('*',`<span class="selo" style="width:40px;height:40px;background:var(--side);font-size:15px">${es.length}</span>`,'Todas as empresas','Visão consolidada · '+S.predios.length+' unidades','var(--side)'):''}</div>
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">${trocando?'<button class="linkbtn small" data-volta="1">Voltar sem trocar</button>':'<span></span>'}<button class="linkbtn small" data-acao="sair">Sair</button></div></div>`;
   app.hidden=true;a.hidden=false;a.style.removeProperty('--emp');
   a.querySelector(`[data-entra="${ult}"]`)?.focus();
@@ -2405,25 +2379,332 @@ document.addEventListener('change',ev=>{const t=ev.target;
   else if(t.dataset?.extconta){const E=stExt();E.contas[t.dataset.extconta]=t.value||null;if(t.value)E.sel.add(t.dataset.extconta);const bt=document.querySelector('[data-acao=ext-lancar]');const c=document.querySelector(`[data-extsel="${t.dataset.extconta}"]`);if(c)c.checked=!!t.value||c.checked;if(bt)bt.textContent=`Lançar ${E.sel.size||''} selecionada${E.sel.size===1?'':'s'}`}
   else if(t.dataset?.extsel){const E=stExt();t.checked?E.sel.add(t.dataset.extsel):E.sel.delete(t.dataset.extsel);const bt=document.querySelector('[data-acao=ext-lancar]');if(bt)bt.textContent=`Lançar ${E.sel.size||''} selecionada${E.sel.size===1?'':'s'}`}
 });
+// ===================== Usuários em dois níveis (master e administrador da empresa) e Gestão de pessoas
+IC.pessoas='<circle cx="12" cy="7" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/><path d="M4 10.5a2.5 2.5 0 1 1 3-3.9M20 10.5a2.5 2.5 0 1 0-3-3.9"/>';
+IC.ausencias='<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 15l2.5 2.5L16 13"/>';
+IC.depto='<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/>';
+TILE_IC.unshift([/f[ée]rias venc|f[ée]rias a vencer/i,'ausencias','warn'],[/ausente|atestado|absente[ií]smo|afast/i,'ausencias','bad'],[/colaborador|admiss|desligam|turnover|usu[áa]rio|convite|departamento/i,'pessoas','accent'],[/folha/i,'down','bad']);
+
+const PAPEIS={admin:['Administrador da empresa','Lança, cadastra unidades e contas e gerencia os usuários e departamentos da empresa'],financeiro:['Financeiro','Lança, importa e dá baixa em contas'],rh:['RH / Pessoas','Cuida de colaboradores, férias e atestados; só consulta o financeiro'],leitura:['Leitura','Só consulta relatórios e lançamentos']};
+const PAPEL_CURTO={admin:'Administrador',financeiro:'Financeiro',rh:'RH',leitura:'Leitura'};
+const adminEmps=()=>S.master?S.empresas:S.empresas.filter(e=>S.papeis[e.id]==='admin');
+const podePessoas=emp=>S.master||['admin','rh'].includes(S.papeis[emp]);
+const pessoasEmps=()=>S.empresas.filter(e=>podePessoas(e.id));
+const depto=id=>(S.departamentos||[]).find(d=>d.id===id);
+function podeVer(r){if(r==='usuarios')return S.master||adminEmps().length>0;if(r==='pessoas'||r==='ausencias')return S.master||pessoasEmps().length>0;return true}
+async function carregarDeptos(){const {data,error}=await sb.from('departamentos').select('*').order('nome');S.departamentos=error?[]:data;S.semPessoas=!!error}
+
+// ---------- datas
+const dISO=d=>d.toISOString().slice(0,10);
+const pD=s=>new Date(s+'T00:00:00Z');
+const addAnos=(s,n)=>{const d=pD(s);d.setUTCFullYear(d.getUTCFullYear()+n);return dISO(d)};
+const diasEntre=(a,b)=>Math.round((pD(b)-pD(a))/864e5);
+function tempoCasa(adm,ate=HOJE){const m=Math.max(0,(+ate.slice(0,4)-+adm.slice(0,4))*12+(+ate.slice(5,7)-+adm.slice(5,7))-(+ate.slice(8)<+adm.slice(8)?1:0));const a=Math.floor(m/12),r=m%12;return a?`${a} ano${a>1?'s':''}${r?` e ${r} m`:''}`:`${r} ${r===1?'mês':'meses'}`}
+function diasUteis(ini,fim){let n=0;for(let d=pD(ini);d<=pD(fim);d.setUTCDate(d.getUTCDate()+1)){const w=d.getUTCDay();if(w&&w<6)n++}return n}
+
+// ---------- tipos de ausência
+const TIPOS_AUS={ferias:['Férias','#3d7cc9','info'],atestado:['Atestado médico','var(--bad)','bad'],afastamento:['Afastamento (INSS)','var(--warn)','warn'],licenca:['Licença','var(--plan)','mute'],falta:['Falta','var(--ink-2)','mute'],folga:['Folga / banco de horas','var(--good)','good']};
+const CONTRATOS={clt:'CLT',pj:'PJ',estagio:'Estágio',temporario:'Temporário',socio:'Sócio'};
+const STATUS_AUS={aprovada:'Aprovada',solicitada:'Solicitada',recusada:'Recusada'};
+
+// ---------- dados de pessoas
+async function dadosPessoas(forcar){
+  if(forcar||!S.pes)S.pes=(async()=>{
+    const [c,a]=await Promise.all([todos(()=>sb.from('colaboradores').select('*').order('nome')),todos(()=>sb.from('ausencias').select('*').order('inicio'))]);
+    return {colab:c,aus:a}})().catch(e=>{S.pes=null;throw e});
+  return S.pes}
+const naSelPes=c=>podePessoas(c.empresa_id)&&naSel(c.empresa_id,c.predio_id);
+const ativoEm=(c,d=HOJE)=>c.admissao<=d&&(!c.desligamento||c.desligamento>=d);
+const ausAtiva=(aus,c,d=HOJE)=>aus.find(a=>a.colaborador_id===c.id&&a.status==='aprovada'&&a.inicio<=d&&a.fim>=d);
+
+// Férias: período aquisitivo de 12 meses a partir da admissão; 30 dias para sair até 12 meses depois (período concessivo).
+// Os dias de férias (mais o abono vendido) abatem os períodos mais antigos primeiro.
+function feriasDe(c,aus){
+  const fimRef=c.desligamento||HOJE,pers=[];
+  for(let k=0;k<60;k++){const ini=addAnos(c.admissao,k);if(ini>fimRef)break;const fim=addDias(addAnos(c.admissao,k+1),-1);pers.push({ini,fim,limite:addDias(addAnos(c.admissao,k+2),-1),gozado:c.ferias_quitadas_ate&&fim<=c.ferias_quitadas_ate?30:0,completo:fim<HOJE})}
+  aus.filter(a=>a.colaborador_id===c.id&&a.tipo==='ferias'&&a.status!=='recusada').sort((x,y)=>x.inicio.localeCompare(y.inicio)).forEach(f=>{let d=f.dias+(f.abono_dias||0);for(const p of pers){if(d<=0)break;const t=Math.min(30-p.gozado,d);p.gozado+=t;d-=t}});
+  const pend=pers.filter(p=>p.completo&&p.gozado<30).map(p=>({...p,saldo:30-p.gozado,sit:p.limite<HOJE?'vencida':p.limite<=addDias(HOJE,60)?'vence':'ok'}));
+  const atual=pers.find(p=>!p.completo);const meses=atual?Math.floor(diasEntre(atual.ini,HOJE)/30.4):0;
+  return {pend,atual,proporcional:atual?Math.max(0,Math.min(30,Math.floor(meses*2.5))-atual.gozado):0,vencidas:pend.filter(p=>p.sit==='vencida').length,vence:pend.filter(p=>p.sit==='vence').length}}
+function chipFerias(fe){if(fe.vencidas)return `<span class="chip bad">${fe.vencidas>1?fe.vencidas+' férias vencidas':'Férias vencidas'}</span>`;if(fe.vence)return '<span class="chip warn">Vence em até 60 dias</span>';if(fe.pend.length)return '<span class="chip info">Com saldo</span>';return '<span class="chip good">Em dia</span>'}
+function situacaoColab(c,aus){if(c.desligamento&&c.desligamento<HOJE)return '<span class="chip mute">Desligado</span>';if(c.admissao>HOJE)return '<span class="chip info">Admissão futura</span>';const a=ausAtiva(aus,c);if(a){const t=TIPOS_AUS[a.tipo];return `<span class="chip ${t[2]}">${a.tipo==='ferias'?'Em férias':t[0]}</span>`}return '<span class="chip good">Ativo</span>'}
+function semTabelasPessoas(){return vazio('Gestão de pessoas quase pronta','<p style="margin:0 auto;max-width:60ch">As telas já estão aqui, mas o banco de dados ainda precisa da atualização com as tabelas de departamentos, colaboradores e ausências.</p>')}
+
+// ===================== Usuários
+function acessosDe(u){return u.acessos||(u.empresas||[]).map(e=>({empresa_id:e,papel:u.papel,departamento_id:null,predios:(u.predios||[]).filter(p=>predio(p)?.empresa_id===e)}))}
+async function vUsuarios(){
+  const emps=adminEmps();
+  if(!podeVer('usuarios'))return vazio('Acesso restrito','<p style="margin:0">Somente a conta master ou o administrador da empresa gerencia usuários.</p>');
+  if(!S.usuarios)S.usuarios=(await chamarAdmin({acao:'listar'})).usuarios;
+  const us=S.usuarios.map(u=>({...u,acessos:acessosDe(u)}));
+  if(S.usrEmp&&!emps.some(e=>e.id===S.usrEmp))S.usrEmp='';
+  const vis=S.usrEmp?emps.filter(e=>e.id===S.usrEmp):emps;
+  const daEmp=e=>us.filter(u=>!u.master&&u.acessos.some(a=>a.empresa_id===e.id));
+  const naoMaster=us.filter(u=>!u.master),deps=(S.departamentos||[]).filter(d=>emps.some(e=>e.id===d.empresa_id));
+  const sit=u=>!u.ativo?'<span class="chip bad">Desativado</span>':!u.convite_aceito?'<span class="chip warn">Convite enviado</span>':'<span class="chip good">Ativo</span>';
+  const ult=u=>u.ultimo_acesso?dataBR(u.ultimo_acesso.slice(0,10)):'–';
+  const tiles=[['Usuários ativos',naoMaster.filter(u=>u.ativo&&u.convite_aceito).length,'nas empresas que você administra'],['Convites pendentes',naoMaster.filter(u=>u.ativo&&!u.convite_aceito).length,'ainda não criaram a senha'],['Departamentos',deps.length,emps.length>1?`em ${emps.length} empresas`:'na empresa'],['Sem departamento',naoMaster.filter(u=>u.acessos.some(a=>!a.departamento_id)).length,'usuários para organizar']];
+  const linhaU=(u,a)=>`<tr><td><b>${esc(u.nome||'')}</b><span class="unit">${esc(u.email)}</span></td>
+      <td><span class="chip ${a.papel==='admin'?'info':'mute'}">${esc(PAPEL_CURTO[a.papel]||a.papel)}</span></td>
+      <td class="wrap">${a.predios?.length?a.predios.map(p=>esc(predio(p)?.nome||'')).join(', '):'<span class="muted">Todas as unidades</span>'}${u.outras_empresas?`<span class="unit">+ ${u.outras_empresas} outra${u.outras_empresas>1?'s':''} empresa${u.outras_empresas>1?'s':''}</span>`:''}</td>
+      <td>${sit(u)}</td><td class="mono">${ult(u)}</td>
+      <td>${u.usuario_id===S.user.id&&!S.master?'<span class="muted">você</span>':`<button class="btn ghost" data-acao="editar-usuario" data-uid="${u.usuario_id}">Editar</button>`}</td></tr>`;
+  const painelEmp=e=>{const lista=daEmp(e);const ds=(S.departamentos||[]).filter(d=>d.empresa_id===e.id);
+    const grupos=ds.map(d=>[d.nome,lista.filter(u=>u.acessos.find(a=>a.empresa_id===e.id).departamento_id===d.id)]).concat([['Sem departamento',lista.filter(u=>!u.acessos.find(a=>a.empresa_id===e.id).departamento_id)]]).filter(g=>g[1].length);
+    return `<div class="panel"><div class="ph"><div><h2 style="display:flex;align-items:center;gap:10px">${seloEmp(e,28)}Usuários · ${esc(nomeEmp(e))}</h2><p class="hint" style="margin:0">${lista.length} usuário${lista.length===1?'':'s'} · ${ds.length} departamento${ds.length===1?'':'s'}</p></div>
+      <div class="ctrls"><button class="btn ghost" data-acao="novo-depto" data-emp="${e.id}">${icone('depto',15)} Departamento</button><button class="btn" data-acao="convidar" data-emp="${e.id}">Convidar usuário</button></div></div>
+      ${lista.length?`<div class="tbl-wrap"><table><thead><tr><th>Nome / e-mail</th><th>Papel</th><th>Unidades</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody>
+      ${grupos.map(([n,g])=>`<tr class="grp-row"><td colspan="6">${icone('depto',14)} ${esc(n)} <span class="muted">· ${g.length}</span></td></tr>${g.map(u=>linhaU(u,u.acessos.find(a=>a.empresa_id===e.id))).join('')}`).join('')}
+      </tbody></table></div>`:'<p class="muted" style="margin:0">Nenhum usuário nesta empresa ainda. Convide a equipe e escolha o departamento de cada pessoa.</p>'}</div>`};
+  const masters=us.filter(u=>u.master),soltos=us.filter(u=>!u.master&&!u.acessos.length);
+  return `<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">${tiles.map(t=>`<div class="tile"><div class="lbl">${t[0]}</div><div class="val">${t[1]}</div><div class="cmp"><span>${t[2]}</span></div></div>`).join('')}</section>
+  ${S.master?`<div class="panel"><div class="ph"><div><h2>${icone('usuarios',16)} Equipe master · ${esc(APP_SUB)}</h2><p class="hint" style="margin:0">Seu controle: enxerga todas as empresas, cria empresas e administra qualquer usuário. Cada empresa cliente cuida dos próprios usuários abaixo.</p></div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Nome / e-mail</th><th>Acesso</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody>
+    ${masters.map(u=>`<tr><td><b>${esc(u.nome||'')}</b><span class="unit">${esc(u.email)}</span></td><td><span class="chip info">Master · todas as empresas</span></td><td>${sit(u)}</td><td class="mono">${ult(u)}</td><td></td></tr>`).join('')}
+    ${soltos.map(u=>`<tr><td><b>${esc(u.nome||'')}</b><span class="unit">${esc(u.email)}</span></td><td><span class="chip warn">Nenhuma empresa</span></td><td>${sit(u)}</td><td class="mono">${ult(u)}</td><td><button class="btn ghost" data-acao="editar-usuario" data-uid="${u.usuario_id}">Editar</button></td></tr>`).join('')}
+    </tbody></table></div></div>`:''}
+  ${emps.length>1?`<div class="ctrls"><label class="muted" for="usrEmp" style="font-size:12.5px">Empresa</label><select id="usrEmp"><option value="">Todas (${emps.length})</option>${emps.map(e=>`<option value="${e.id}" ${S.usrEmp===e.id?'selected':''}>${esc(nomeEmp(e))}</option>`).join('')}</select></div>`:''}
+  ${vis.map(painelEmp).join('')||semEmpresa()}
+  ${S.master?await painelAcessos():''}
+  <div class="panel"><h2>Como funcionam os acessos</h2><div class="tbl-wrap"><table><tbody>
+    <tr><td><span class="chip info">Master</span></td><td class="wrap">Equipe ${esc(APP_SUB)} (${esc(MASTER_EMAIL)}). Vê todas as empresas, cria empresas e administra todos os usuários.</td></tr>
+    ${Object.values(PAPEIS).map(p=>`<tr><td><b>${p[0]}</b></td><td class="wrap">${p[1]}</td></tr>`).join('')}
+    <tr><td><b>Departamento</b></td><td class="wrap">Organiza os usuários de cada empresa (Financeiro, Compras, Operação…). É o mesmo cadastro usado na gestão de pessoas.</td></tr>
+    <tr><td><b>Unidades</b></td><td class="wrap">Sem unidade marcada, a pessoa vê todas as unidades da empresa. Marcando unidades, ela só vê os lançamentos dessas unidades.</td></tr></tbody></table></div></div>`;
+}
+function blocoAcesso(e,a,fixo){const ds=(S.departamentos||[]).filter(d=>d.empresa_id===e.id&&d.ativo!==false),ps=S.predios.filter(p=>p.empresa_id===e.id),pre=new Set(a?.predios||[]);
+  return `<div class="acc-emp"><label class="acc-h"><input type="checkbox" data-ue="${e.id}" ${a||fixo?'checked':''}>${seloEmp(e,22)}<b>${esc(nomeEmp(e))}</b></label>
+    <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+      <div class="field"><label for="pp_${e.id}">Papel</label><select id="pp_${e.id}" name="papel_${e.id}">${Object.entries(PAPEIS).map(([v,p])=>`<option value="${v}" ${(a?.papel||'financeiro')===v?'selected':''}>${p[0]}</option>`).join('')}</select></div>
+      <div class="field"><label for="dp_${e.id}">Departamento</label><select id="dp_${e.id}" name="depto_${e.id}"><option value="">Sem departamento</option>${ds.map(d=>`<option value="${d.id}" ${a?.departamento_id===d.id?'selected':''}>${esc(d.nome)}</option>`).join('')}</select></div></div>
+    ${ps.length?`<div class="checks inline">${ps.map(p=>`<label><input type="checkbox" data-up="${p.id}" data-emp="${e.id}" ${pre.has(p.id)?'checked':''}>${esc(p.nome)}</label>`).join('')}</div><span class="muted" style="font-size:12px">Unidades desmarcadas = vê todas as unidades.</span>`:''}</div>`}
+function formUsuario(uid,empPre){
+  const u=uid?S.usuarios.find(x=>x.usuario_id===uid):null;const ac=u?acessosDe(u):[];const emps=adminEmps();
+  drawer(`<h3>${u?'Editar acesso de '+esc(u.nome||u.email):'Convidar usuário'}</h3>
+  ${u?'':'<p class="muted" style="margin:0">A pessoa recebe um e-mail (ou um link por WhatsApp) para criar a senha e entrar. Se ela já usa o app em outra empresa, só ganha o acesso a esta.</p>'}
+  ${u?.outras_empresas&&!S.master?`<div class="effect">Esta pessoa também acessa ${u.outras_empresas} outra${u.outras_empresas>1?'s':''} empresa${u.outras_empresas>1?'s':''}. Aqui você muda só o acesso às suas.</div>`:''}
+  <form data-form="usuario" data-uid="${uid||''}" class="form-grid">
+    <div class="field"><label for="uNome">Nome</label><input id="uNome" name="nome" value="${esc(u?.nome||'')}" ${u?'':'required'}></div>
+    <div class="field" style="grid-column:span 2"><label for="uEmail">E-mail</label><input id="uEmail" name="email" type="email" required value="${esc(u?.email||'')}" ${u?'readonly':''}></div>
+    <div class="field wide"><label>Empresas, papel e departamento</label><div class="acc-lista">
+      ${emps.map(e=>blocoAcesso(e,ac.find(a=>a.empresa_id===e.id),!u&&(empPre===e.id||emps.length===1))).join('')||'<span class="muted">Cadastre empresas primeiro.</span>'}</div></div>
+    ${u?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" ${u.ativo?'checked':''}> Acesso ativo (desmarque para bloquear a entrada)</label>`:''}
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">${u?'Salvar':'Enviar convite'}</button>${u?`<button type="button" class="btn ghost" data-acao="reenviar" data-email="${esc(u.email)}">Reenviar e-mail de acesso</button><button type="button" class="btn ghost" data-acao="gerar-link" data-email="${esc(u.email)}">Gerar link para WhatsApp</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+}
+
+// ===================== Gestão de pessoas · Colaboradores
+async function vPessoas(){
+  if(S.semPessoas)return semTabelasPessoas();
+  if(!pessoasEmps().length)return vazio('Sem empresas para gestão de pessoas','<p style="margin:0">Somente master, administrador ou RH da empresa vê os colaboradores.</p>');
+  const D=await dadosPessoas();const aus=D.aus;const ano=S.ano,ini=ano+'-01-01',fim=ano+'-12-31';
+  const todosC=D.colab.filter(naSelPes);
+  const ativos=todosC.filter(c=>ativoEm(c));
+  const adm=todosC.filter(c=>c.admissao>=ini&&c.admissao<=fim).length,desl=todosC.filter(c=>c.desligamento&&c.desligamento>=ini&&c.desligamento<=fim).length;
+  const ativosIni=todosC.filter(c=>ativoEm(c,ini)).length,media=(ativosIni+ativos.length)/2||1;
+  const folha=sum(ativos.map(c=>+c.salario||0));
+  const fes=new Map(ativos.map(c=>[c.id,feriasDe(c,aus)]));
+  const tiles=[['Colaboradores ativos',ativos.length,`${ativosIni} em 01/01/${ano}`],['Admissões em '+ano,adm,'contratações no ano'],['Desligamentos em '+ano,desl,'saídas no ano'],['Turnover '+ano,pct(((adm+desl)/2)/media),'média de entradas e saídas sobre o quadro'],['Folha mensal (salários)',k(folha),ativos.length?'média '+brl.format(folha/ativos.length):'']];
+  const grupos={};ativos.forEach(c=>{const kk=c.departamento_id||'';(grupos[kk]=grupos[kk]||{n:0,f:0}).n++;grupos[kk].f+=+c.salario||0});
+  const linhasD=Object.entries(grupos).map(([id,g])=>[id?depto(id)?.nome||'—':'Sem departamento',g.n,g.f]).sort((a,b)=>b[1]-a[1]);const maxD=Math.max(1,...linhasD.map(x=>x[1]));
+  const al=[];const venc=ativos.filter(c=>fes.get(c.id).vencidas),vence=ativos.filter(c=>fes.get(c.id).vence);
+  if(venc.length)al.push(['bad','#ausencias',`${venc.length} colaborador${venc.length>1?'es':''} com férias vencidas`,venc.slice(0,3).map(c=>c.nome).join(', ')+(venc.length>3?'…':'')+' · a empresa paga em dobro']);
+  if(vence.length)al.push(['warn','#ausencias',`${vence.length} com férias vencendo em até 60 dias`,vence.slice(0,3).map(c=>c.nome).join(', ')+(vence.length>3?'…':'')]);
+  const exp=ativos.filter(c=>c.contrato==='clt'&&diasEntre(c.admissao,HOJE)<90&&c.admissao<=HOJE);if(exp.length)al.push(['warn','#pessoas',`${exp.length} em contrato de experiência`,exp.map(c=>`${c.nome} até ${dataBR(addDias(c.admissao,89))}`).slice(0,3).join(' · ')]);
+  const fora=ativos.map(c=>[c,ausAtiva(aus,c)]).filter(x=>x[1]);if(fora.length)al.push(['accent','#ausencias',`${fora.length} ausente${fora.length>1?'s':''} hoje`,fora.slice(0,3).map(([c,a])=>`${c.nome} (${TIPOS_AUS[a.tipo][0].toLowerCase()} até ${dataBR(a.fim)})`).join(' · ')]);
+  const mesH=HOJE.slice(5,7),aniv=ativos.filter(c=>c.nascimento?.slice(5,7)===mesH);if(aniv.length)al.push(['good','#pessoas',`${aniv.length} aniversariante${aniv.length>1?'s':''} no mês`,aniv.map(c=>`${c.nome} (${c.nascimento.slice(8)}/${mesH})`).slice(0,4).join(' · ')]);
+  const semD=ativos.filter(c=>!c.departamento_id).length;if(semD)al.push(['warn','#pessoas',`${semD} sem departamento`,'Edite o cadastro para organizar por área.']);
+  if(!al.length)al.push(['good','#pessoas','Tudo em dia','Sem férias vencidas nem pendências de cadastro.']);
+  const filtro=S.pesFiltro||'ativos',q=norm(S.pesBusca||'');
+  let lista=filtro==='ativos'?todosC.filter(c=>!c.desligamento||c.desligamento>=HOJE):filtro==='desligados'?todosC.filter(c=>c.desligamento&&c.desligamento<HOJE):todosC;
+  if(q)lista=lista.filter(c=>norm([c.nome,c.cargo,depto(c.departamento_id)?.nome,c.email].join(' ')).includes(q));
+  const varias=pessoasEmps().length>1;
+  const deps=(S.departamentos||[]).filter(d=>podePessoas(d.empresa_id)&&selEmp().some(e=>e.id===d.empresa_id));
+  return `<section class="grid g-tiles">${tiles.map(t=>`<div class="tile"><div class="lbl">${t[0]}</div><div class="val">${t[1]}</div><div class="cmp"><span>${t[2]}</span></div></div>`).join('')}</section>
+  <section class="grid g-2">
+    <div class="panel"><div class="ph"><div><h2>Pessoas por departamento</h2><p class="hint" style="margin:0">Quadro ativo hoje e folha mensal (salário base)</p></div></div>
+      ${linhasD.length?`<div class="tbl-wrap"><table><thead><tr><th>Departamento</th><th class="n">Pessoas</th><th></th><th class="n">Folha</th><th class="n">% da folha</th></tr></thead><tbody>
+      ${linhasD.map(([n,q_,f])=>`<tr><td>${esc(n)}</td><td class="n">${q_}</td><td><div class="bar-cell"><span style="width:${Math.round(90*q_/maxD)}px"></span></div></td><td class="n">${num.format(Math.round(f))}</td><td class="n">${pct(folha?f/folha:0)}</td></tr>`).join('')}
+      <tr class="tot"><td>Total</td><td class="n">${ativos.length}</td><td></td><td class="n">${num.format(Math.round(folha))}</td><td class="n">${pct(folha?1:0)}</td></tr></tbody></table></div>`:'<p class="muted" style="margin:0">Cadastre o primeiro colaborador.</p>'}</div>
+    <div class="panel"><h2>Precisa de atenção</h2><p class="hint">${esc(escopo())}</p><div class="alerts">
+      ${al.map(a=>`<a class="alert" href="${a[1]}" style="color:inherit;text-decoration:none"><span class="dot" style="background:var(--${a[0]})"></span><div><b>${esc(a[2])}</b><small>${esc(a[3])}</small></div></a>`).join('')}</div></div>
+  </section>
+  <div class="panel"><div class="ph"><div><h2>Colaboradores</h2><p class="hint" style="margin:0">${lista.length} de ${todosC.length} · clique para editar</p></div>
+    <div class="ctrls"><input type="text" id="pesBusca" placeholder="Buscar nome, cargo ou departamento" value="${esc(S.pesBusca||'')}" style="border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0;width:230px;max-width:100%">
+    <div class="seg" role="group" aria-label="Situação">${[['ativos','Ativos'],['desligados','Desligados'],['todos','Todos']].map(([v,n])=>`<button data-pesfiltro="${v}" class="${filtro===v?'on':''}">${n}</button>`).join('')}</div>
+    <button class="btn" data-acao="novo-colab">Novo colaborador</button></div></div>
+    ${lista.length?`<div class="tbl-wrap"><table><thead><tr><th>Nome / cargo</th><th>Departamento</th><th>${varias?'Empresa / unidade':'Unidade'}</th><th>Admissão</th><th>Tempo de casa</th><th>Contrato</th><th class="n">Salário</th><th>Férias</th><th>Situação</th></tr></thead><tbody>
+    ${lista.slice(0,500).map(c=>{const fe=fes.get(c.id)||feriasDe(c,aus);return `<tr class="click" data-acao="editar-colab" data-id="${c.id}"><td><b>${esc(c.nome)}</b><span class="unit">${esc(c.cargo||'')}</span></td><td>${esc(depto(c.departamento_id)?.nome||'–')}</td><td>${varias?esc(nomeEmp(empresa(c.empresa_id)))+`<span class="unit">${esc(predio(c.predio_id)?.nome||'')}</span>`:esc(predio(c.predio_id)?.nome||'–')}</td><td class="mono">${dataBR(c.admissao)}</td><td>${tempoCasa(c.admissao,c.desligamento&&c.desligamento<HOJE?c.desligamento:HOJE)}</td><td>${CONTRATOS[c.contrato]||''}</td><td class="n">${c.salario!=null?brl2.format(c.salario):'–'}</td><td>${c.desligamento&&c.desligamento<HOJE?'':chipFerias(fe)}</td><td>${situacaoColab(c,aus)}</td></tr>`}).join('')}
+    </tbody></table></div>`:`<p class="muted" style="margin:0">${todosC.length?'Nenhum colaborador neste filtro.':'Nenhum colaborador cadastrado nas unidades selecionadas.'}</p>`}</div>
+  <div class="panel"><div class="ph"><div><h2>Departamentos</h2><p class="hint" style="margin:0">Usados nos colaboradores e nos usuários do app · clique para editar</p></div><button class="btn ghost" data-acao="novo-depto">${icone('depto',15)} Novo departamento</button></div>
+    ${deps.length?`<div class="tbl-wrap"><table><thead><tr>${varias?'<th>Empresa</th>':''}<th>Departamento</th><th>Responsável</th><th>Centro de custo</th><th class="n">Colaboradores</th><th>Situação</th></tr></thead><tbody>
+    ${deps.map(d=>`<tr class="click" data-acao="editar-depto" data-id="${d.id}">${varias?`<td>${esc(nomeEmp(empresa(d.empresa_id)))}</td>`:''}<td><b>${esc(d.nome)}</b></td><td>${esc(d.responsavel||'–')}</td><td>${esc(centro(d.centro_custo_id)?.nome||'–')}</td><td class="n">${ativos.filter(c=>c.departamento_id===d.id).length}</td><td>${d.ativo===false?'<span class="chip mute">Inativo</span>':'<span class="chip good">Ativo</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted" style="margin:0">Nenhum departamento.</p>'}</div>`;
+}
+
+// ===================== Gestão de pessoas · Férias e ausências
+function chartAus(labels,series){
+  const W=640,H=230,L=40,R_=12,T=14,B=28,iw=W-L-R_,ih=H-T-B;const tot=labels.map((_,i)=>sum(series.map(s=>s.vals[i])));
+  const max=Math.max(4,...tot)*1.1,n=labels.length,bw=iw/n,y=v=>T+ih-(v/max)*ih,step=Math.max(1,niceStep(max/4));
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Dias de ausência por mês e tipo">`;
+  for(let t=0;t<=max;t+=step)s+=`<line x1="${L}" x2="${W-R_}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${t}</text>`;
+  labels.forEach((l,i)=>{let base=0;series.forEach(se=>{const v=se.vals[i];if(!v)return;s+=`<rect x="${L+i*bw+bw*.2}" y="${y(base+v)}" width="${bw*.6}" height="${y(base)-y(base+v)}" fill="${se.cor}" stroke="var(--surface)" stroke-width="1"><title>${l} · ${se.nome}: ${v} dia${v>1?'s':''}</title></rect>`;base+=v});
+    s+=`<text x="${L+i*bw+bw/2}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--ink-3)">${l}</text>`});
+  return s+'</svg>'}
+function diasNoMes(a,ano,m0){const i=ym(ano,m0)+'-01',f=fimMes(ano,m0);const ini=a.inicio>i?a.inicio:i,fim=a.fim<f?a.fim:f;return fim>=ini?diasEntre(ini,fim)+1:0}
+async function vAusencias(){
+  if(S.semPessoas)return semTabelasPessoas();
+  if(!pessoasEmps().length)return vazio('Sem empresas para gestão de pessoas','<p style="margin:0">Somente master, administrador ou RH da empresa vê férias e ausências.</p>');
+  const D=await dadosPessoas();const ano=S.ano;
+  const cs=D.colab.filter(naSelPes),ids=new Set(cs.map(c=>c.id)),col=id=>D.colab.find(c=>c.id===id);
+  const aus=D.aus.filter(a=>ids.has(a.colaborador_id));const val=aus.filter(a=>a.status==='aprovada');
+  const ativos=cs.filter(c=>ativoEm(c));const fes=ativos.map(c=>[c,feriasDe(c,D.aus)]);
+  const hoje=ativos.filter(c=>ausAtiva(val,c)).length;
+  const series=Object.entries(TIPOS_AUS).map(([t,[n,cor]])=>({t,nome:n,cor,vals:MESES.map((_,m)=>sum(val.filter(a=>a.tipo===t).map(a=>diasNoMes(a,ano,m))))})).filter(s=>s.vals.some(Boolean));
+  const diasT=t=>sum(series.filter(s=>t.includes(s.t)).map(s=>sum(s.vals)));
+  const ateRef=ano<+HOJE.slice(0,4)?ano+'-12-31':HOJE,ini=ano+'-01-01';
+  const absD=diasT(['atestado','falta']),base=ateRef>=ini?diasUteis(ini,ateRef)*Math.max(1,ativos.length):0;
+  const venc=fes.filter(([,f])=>f.vencidas).length,vence=fes.filter(([,f])=>f.vence).length;
+  const tiles=[['Ausentes hoje',hoje,`de ${ativos.length} ativos`],['Férias vencidas',venc,venc?'pagamento em dobro (CLT art. 137)':'nenhuma'],['Férias a vencer · 60 dias',vence,'programe a saída'],['Dias de atestado '+ano,diasT(['atestado']),`${val.filter(a=>a.tipo==='atestado'&&a.inicio.startsWith(ano)).length} atestados`],['Absenteísmo '+ano,base?pct(absD/base):'–','atestados e faltas ÷ dias úteis do quadro']];
+  const mm=S.ausMes??(ano===+HOJE.slice(0,4)?+HOJE.slice(5,7)-1:0);const nd=+fimMes(ano,mm).slice(8);
+  const noMes=val.filter(a=>diasNoMes(a,ano,mm)>0);const pessoasMes=[...new Set(noMes.map(a=>a.colaborador_id))].map(col).filter(Boolean).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const dias=[...Array(nd).keys()].map(d=>ym(ano,mm)+'-'+String(d+1).padStart(2,'0'));
+  const fds=d=>[0,6].includes(pD(d).getUTCDay());
+  const mapa=pessoasMes.length?`<div class="tbl-wrap"><table class="mapa"><thead><tr><th>Colaborador</th>${dias.map(d=>`<th class="${fds(d)?'fds':''}${d===HOJE?' hj':''}">${+d.slice(8)}</th>`).join('')}</tr></thead><tbody>
+    ${pessoasMes.map(c=>`<tr><td>${esc(c.nome)}</td>${dias.map(d=>{const a=noMes.find(x=>x.colaborador_id===c.id&&x.inicio<=d&&x.fim>=d);return `<td class="${fds(d)?'fds':''}${d===HOJE?' hj':''}">${a?`<i style="background:${TIPOS_AUS[a.tipo][1]}" title="${esc(TIPOS_AUS[a.tipo][0])} · ${dataBR(a.inicio)} a ${dataBR(a.fim)}" data-acao="editar-aus" data-id="${a.id}"></i>`:''}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`:`<p class="muted" style="margin:0">Ninguém ausente em ${MESES[mm]}/${ano}.</p>`;
+  const ordem={vencida:0,vence:1,ok:2};
+  const ctrl=fes.map(([c,f])=>({c,f,p:f.pend[0]})).sort((a,b)=>(a.p?ordem[a.p.sit]:3)-(b.p?ordem[b.p.sit]:3)||String(a.p?.limite||a.f.atual?.fim).localeCompare(String(b.p?.limite||b.f.atual?.fim)));
+  const lanc=aus.filter(a=>a.inicio<=ano+'-12-31'&&a.fim>=ano+'-01-01').sort((a,b)=>b.inicio.localeCompare(a.inicio));
+  return `<section class="grid g-tiles">${tiles.map(t=>`<div class="tile"><div class="lbl">${t[0]}</div><div class="val">${t[1]}</div><div class="cmp"><span>${t[2]}</span></div></div>`).join('')}</section>
+  <section class="grid g-2">
+    <div class="panel"><div class="ph"><div><h2>Dias de ausência por mês · ${ano}</h2><p class="hint" style="margin:0">Somente ausências aprovadas, por tipo</p></div></div>
+      ${series.length?chartAus(MESES,series)+`<div class="legend">${series.map(s=>`<span><i style="background:${s.cor}"></i>${s.nome} · ${sum(s.vals)} d</span>`).join('')}</div>`:'<p class="muted" style="margin:0">Nenhuma ausência registrada no ano.</p>'}</div>
+    <div class="panel"><div class="ph"><div><h2>Controle de férias</h2><p class="hint" style="margin:0">30 dias por período aquisitivo; sair até 12 meses depois</p></div></div>
+      ${ctrl.length?`<div class="tbl-wrap" style="max-height:330px;overflow:auto"><table><thead><tr><th>Colaborador</th><th>Período aquisitivo</th><th class="n">Saldo</th><th>Sair até</th><th></th></tr></thead><tbody>
+      ${ctrl.map(({c,f,p})=>`<tr><td>${esc(c.nome)}<span class="unit">desde ${dataBR(c.admissao)}</span></td><td class="mono">${p?`${dataBR(p.ini)}<span class="unit">a ${dataBR(p.fim)}</span>`:f.atual?`<span class="muted">em curso até ${dataBR(f.atual.fim)}</span>`:'–'}</td><td class="n">${p?p.saldo+' d':f.proporcional+' d prop.'}</td><td>${p?`<span class="chip ${p.sit==='vencida'?'bad':p.sit==='vence'?'warn':'mute'}">${dataBR(p.limite)}</span>`:'–'}</td><td><button class="btn ghost" data-acao="nova-aus" data-colab="${c.id}" data-tipo="ferias">Programar</button></td></tr>`).join('')}
+      </tbody></table></div>`:'<p class="muted" style="margin:0">Nenhum colaborador ativo.</p>'}</div>
+  </section>
+  <div class="panel"><div class="ph"><div><h2>Mapa de ausências</h2><p class="hint" style="margin:0">Quem fica fora em cada dia do mês · clique na marca para editar</p></div>
+    <div class="ctrls"><select id="ausMes" aria-label="Mês">${MESES.map((m,i)=>`<option value="${i}" ${i===mm?'selected':''}>${m}/${ano}</option>`).join('')}</select></div></div>
+    ${mapa}<div class="legend">${Object.values(TIPOS_AUS).map(([n,c])=>`<span><i style="background:${c}"></i>${n}</span>`).join('')}</div></div>
+  <div class="panel"><div class="ph"><div><h2>Férias, atestados e afastamentos · ${ano}</h2><p class="hint" style="margin:0">${lanc.length} registro${lanc.length===1?'':'s'} · clique para editar</p></div><button class="btn" data-acao="nova-aus">Registrar ausência</button></div>
+    ${lanc.length?`<div class="tbl-wrap"><table><thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th class="n">Dias</th><th>CID / motivo</th><th>Situação</th></tr></thead><tbody>
+    ${lanc.map(a=>{const c=col(a.colaborador_id),t=TIPOS_AUS[a.tipo];return `<tr class="click" data-acao="editar-aus" data-id="${a.id}"><td>${esc(c?.nome||'')}<span class="unit">${esc(depto(c?.departamento_id)?.nome||'')}</span></td><td><span class="chip ${t[2]}">${t[0]}</span></td><td class="mono">${dataBR(a.inicio)} a ${dataBR(a.fim)}</td><td class="n">${a.dias}${a.abono_dias?` + ${a.abono_dias} abono`:''}</td><td class="wrap">${esc([a.cid,a.motivo].filter(Boolean).join(' · ')||'–')}</td><td><span class="chip ${a.status==='aprovada'?'good':a.status==='recusada'?'bad':'warn'}">${STATUS_AUS[a.status]}</span></td></tr>`}).join('')}
+    </tbody></table></div>`:'<p class="muted" style="margin:0">Nenhum registro no ano.</p>'}</div>`;
+}
+
+// ---------- formulários de pessoas
+const optEmp=(lista,sel)=>lista.map(e=>`<option value="${e.id}" ${e.id===sel?'selected':''}>${esc(nomeEmp(e))}</option>`).join('');
+const optDeptos=(emp,sel)=>`<option value="">Sem departamento</option>${(S.departamentos||[]).filter(d=>d.empresa_id===emp&&(d.ativo!==false||d.id===sel)).map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${esc(d.nome)}</option>`).join('')}`;
+const optUnid=(emp,sel)=>`<option value="">Empresa toda</option>${S.predios.filter(p=>p.empresa_id===emp).map(p=>`<option value="${p.id}" ${p.id===sel?'selected':''}>${esc(p.nome)}</option>`).join('')}`;
+const num2=v=>(+v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+function empPadrao(){const es=pessoasEmps(),s=selEmp().filter(e=>podePessoas(e.id));return (s[0]||es[0])?.id}
+function formColab(id){
+  const c=id?S._colab?.find(x=>x.id===id):null;const emp=c?.empresa_id||empPadrao();const es=pessoasEmps();
+  if(!emp){toast('Somente master, administrador ou RH cadastra colaboradores.');return}
+  drawer(`<h3>${c?'Editar '+esc(c.nome):'Novo colaborador'}</h3><form data-form="colab" data-id="${c?.id||''}" class="form-grid">
+    ${es.length>1&&!c?`<div class="field wide"><label for="cEmp">Empresa</label><select id="cEmp" name="empresa" data-troca-pes="1">${optEmp(es,emp)}</select></div>`:`<input type="hidden" name="empresa" value="${emp}">`}
+    <div class="field" style="grid-column:span 2"><label for="cNome">Nome completo</label><input id="cNome" name="nome" required maxlength="120" value="${esc(c?.nome||'')}"></div>
+    <div class="field"><label for="cCpf">CPF</label><input id="cCpf" name="cpf" inputmode="numeric" placeholder="000.000.000-00" value="${esc(c?.cpf||'')}"></div>
+    <div class="field"><label for="cCargo">Cargo</label><input id="cCargo" name="cargo" value="${esc(c?.cargo||'')}"></div>
+    <div class="field"><label for="cDep">Departamento</label><select id="cDep" name="depto">${optDeptos(emp,c?.departamento_id)}</select></div>
+    <div class="field"><label for="cUn">Unidade</label><select id="cUn" name="unidade">${optUnid(emp,c?.predio_id)}</select></div>
+    <div class="field"><label for="cAdm">Admissão</label><input id="cAdm" name="admissao" type="date" required value="${c?.admissao||HOJE}"></div>
+    <div class="field"><label for="cCt">Contrato</label><select id="cCt" name="contrato">${Object.entries(CONTRATOS).map(([v,n])=>`<option value="${v}" ${(c?.contrato||'clt')===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="cSal">Salário base</label><input id="cSal" name="salario" inputmode="decimal" placeholder="0,00" value="${c?.salario!=null?num2(c.salario):''}"></div>
+    <div class="field"><label for="cNasc">Nascimento</label><input id="cNasc" name="nascimento" type="date" value="${c?.nascimento||''}"></div>
+    <div class="field"><label for="cMail">E-mail</label><input id="cMail" name="email" type="email" value="${esc(c?.email||'')}"></div>
+    <div class="field"><label for="cTel">Telefone</label><input id="cTel" name="telefone" inputmode="tel" value="${esc(c?.telefone||'')}"></div>
+    <div class="field"><label for="cFq">Férias em dia até</label><input id="cFq" name="quitadas" type="date" value="${c?.ferias_quitadas_ate||''}"><small class="muted">Períodos aquisitivos que terminaram até esta data já foram tirados</small></div>
+    <div class="field"><label for="cDesl">Desligamento</label><input id="cDesl" name="desligamento" type="date" value="${c?.desligamento||''}"></div>
+    <div class="field wide"><label for="cObs">Observações</label><input id="cObs" name="obs" value="${esc(c?.observacao||'')}"></div>
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${c?`<button type="button" class="btn ghost" data-acao="nova-aus" data-colab="${c.id}">Registrar ausência</button><button type="button" class="btn ghost" data-acao="excluir-colab" data-id="${c.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+function formAus(id,colab,tipo){
+  const a=id?S._aus?.find(x=>x.id===id):null;const cs=(S._colab||[]).filter(c=>podePessoas(c.empresa_id)&&(ativoEm(c)||c.admissao>HOJE||c.id===a?.colaborador_id||c.id===colab)).sort((x,y)=>x.nome.localeCompare(y.nome));
+  const sel=a?.colaborador_id||colab,t=a?.tipo||tipo||'atestado';
+  if(!cs.length){toast('Cadastre um colaborador primeiro.');return}
+  drawer(`<h3>${a?'Editar ausência':'Registrar ausência'}</h3><form data-form="aus" data-id="${a?.id||''}" class="form-grid">
+    <div class="field" style="grid-column:span 2"><label for="aCol">Colaborador</label><select id="aCol" name="colab" required>${cs.map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.nome)}${pessoasEmps().length>1?' · '+esc(nomeEmp(empresa(c.empresa_id))):''}</option>`).join('')}</select></div>
+    <div class="field"><label for="aTipo">Tipo</label><select id="aTipo" name="tipo">${Object.entries(TIPOS_AUS).map(([v,[n]])=>`<option value="${v}" ${t===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="aIni">Início</label><input id="aIni" name="inicio" type="date" required value="${a?.inicio||HOJE}"></div>
+    <div class="field"><label for="aFim">Fim (último dia fora)</label><input id="aFim" name="fim" type="date" required value="${a?.fim||HOJE}"></div>
+    <div class="field"><label for="aSt">Situação</label><select id="aSt" name="status">${Object.entries(STATUS_AUS).map(([v,n])=>`<option value="${v}" ${(a?.status||'aprovada')===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="aAb">Abono (dias vendidos)</label><input id="aAb" name="abono" type="number" min="0" max="10" value="${a?.abono_dias||0}"><small class="muted">Só para férias</small></div>
+    <div class="field"><label for="aCid">CID</label><input id="aCid" name="cid" maxlength="10" placeholder="Só atestado" value="${esc(a?.cid||'')}"></div>
+    <div class="field wide"><label for="aMot">Motivo / observação</label><input id="aMot" name="motivo" value="${esc(a?.motivo||'')}"></div>
+    <div class="wide effect">Férias: até 3 períodos, um deles com pelo menos 14 dias e os demais com pelo menos 5. Afastamento por doença acima de 15 dias segue para o INSS.</div>
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${a?`<button type="button" class="btn ghost" data-acao="excluir-aus" data-id="${a.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+function formDepto(id,empPre){
+  const d=id?S.departamentos.find(x=>x.id===id):null;const es=pessoasEmps();const emp=d?.empresa_id||empPre||empPadrao();
+  if(!es.length||!emp){toast('Somente master, administrador ou RH cadastra departamentos.');return}
+  drawer(`<h3>${d?'Editar departamento':'Novo departamento'}</h3><form data-form="depto" data-id="${d?.id||''}" class="form-grid">
+    ${es.length>1&&!d?`<div class="field wide"><label for="dEmp">Empresa</label><select id="dEmp" name="empresa" data-troca-pes="1">${optEmp(es,emp)}</select></div>`:`<input type="hidden" name="empresa" value="${emp}">`}
+    <div class="field"><label for="dNome">Nome</label><input id="dNome" name="nome" required maxlength="80" placeholder="Financeiro" value="${esc(d?.nome||'')}"></div>
+    <div class="field"><label for="dResp">Responsável</label><input id="dResp" name="responsavel" value="${esc(d?.responsavel||'')}"></div>
+    <div class="field"><label for="dCc">Centro de custo</label><select id="dCc" name="centro"><option value="">Nenhum</option>${S.centros.filter(c=>c.empresa_id===emp).map(c=>`<option value="${c.id}" ${d?.centro_custo_id===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></div>
+    ${d?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" ${d.ativo!==false?'checked':''}> Departamento ativo</label>`:''}
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button>${d?`<button type="button" class="btn ghost" data-acao="excluir-depto" data-id="${d.id}" style="color:var(--bad)">Excluir</button>`:''}<button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
+function trocaEmpPes(sel){const f=sel.form,emp=sel.value;if(f.depto)f.depto.innerHTML=optDeptos(emp);if(f.unidade)f.unidade.innerHTML=optUnid(emp);if(f.centro)f.centro.innerHTML=`<option value="">Nenhum</option>${S.centros.filter(c=>c.empresa_id===emp).map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}`}
+async function aposPessoas(msg){fecharDrawer();toast(msg);await dadosPessoas(true);render(true)}
+const FORMS_PES={
+  async usuario(f){
+    const acessos=[...f.querySelectorAll('[data-ue]:checked')].map(x=>{const e=x.dataset.ue;return {empresa_id:e,papel:f.elements['papel_'+e].value,departamento_id:f.elements['depto_'+e].value||null,predios:[...f.querySelectorAll(`[data-up][data-emp="${e}"]:checked`)].map(p=>p.dataset.up)}});
+    const base={nome:f.nome.value.trim(),acessos};
+    if(f.dataset.uid){await chamarAdmin({acao:'atualizar',usuario_id:f.dataset.uid,ativo:f.ativo.checked,...base});toast('Acesso atualizado.')}
+    else{if(!acessos.length)return toast('Marque pelo menos uma empresa.');const r=await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});
+      if(r?.link){S.usuarios=null;mostrarLink(f.email.value.trim(),r.link,true);return}
+      toast(r?.existente?'Esta pessoa já tinha cadastro: acesso liberado.':'Convite enviado para '+f.email.value.trim()+'.')}
+    S.usuarios=null;fecharDrawer();render()},
+  async colab(f){
+    const cpf=soDig(f.cpf.value);if(cpf&&cpf.length!==11)return toast('O CPF precisa ter 11 dígitos.');
+    const sal=f.salario.value.trim()?parseValor(f.salario.value):null;if(sal!=null&&(isNaN(sal)||sal<0))return toast('Salário inválido.');
+    if(f.desligamento.value&&f.desligamento.value<f.admissao.value)return toast('O desligamento não pode ser antes da admissão.');
+    const d={nome:f.nome.value.trim(),cpf:cpf||null,cargo:f.cargo.value.trim()||null,departamento_id:f.depto.value||null,predio_id:f.unidade.value||null,admissao:f.admissao.value,contrato:f.contrato.value,salario:sal==null?null:r2(sal),nascimento:f.nascimento.value||null,email:f.email.value.trim()||null,telefone:f.telefone.value.trim()||null,desligamento:f.desligamento.value||null,ferias_quitadas_ate:f.quitadas.value||null,observacao:f.obs.value.trim()||null};
+    const {error}=f.dataset.id?await sb.from('colaboradores').update(d).eq('id',f.dataset.id):await sb.from('colaboradores').insert({...d,empresa_id:f.empresa.value});
+    if(error)throw error;await aposPessoas('Colaborador salvo.')},
+  async aus(f){
+    const ini=f.inicio.value,fim=f.fim.value,c=f.colab.value;if(fim<ini)return toast('O fim não pode ser antes do início.');
+    const choque=(S._aus||[]).find(a=>a.colaborador_id===c&&a.id!==f.dataset.id&&a.status!=='recusada'&&a.inicio<=fim&&a.fim>=ini);
+    if(choque&&f.status.value!=='recusada')return toast(`Já existe ${TIPOS_AUS[choque.tipo][0].toLowerCase()} de ${dataBR(choque.inicio)} a ${dataBR(choque.fim)} para esta pessoa.`);
+    const ab=f.tipo.value==='ferias'?Math.max(0,Math.min(10,+f.abono.value||0)):0;
+    const d={colaborador_id:c,tipo:f.tipo.value,inicio:ini,fim,status:f.status.value,abono_dias:ab,cid:f.tipo.value==='atestado'?f.cid.value.trim().toUpperCase()||null:null,motivo:f.motivo.value.trim()||null};
+    const {error}=f.dataset.id?await sb.from('ausencias').update(d).eq('id',f.dataset.id):await sb.from('ausencias').insert(d);
+    if(error)throw error;await aposPessoas('Registro salvo: '+TIPOS_AUS[d.tipo][0].toLowerCase()+'.')},
+  async depto(f){
+    const d={nome:f.nome.value.trim(),responsavel:f.responsavel.value.trim()||null,centro_custo_id:f.centro.value||null};
+    if(f.dataset.id)d.ativo=f.ativo.checked;
+    const {error}=f.dataset.id?await sb.from('departamentos').update(d).eq('id',f.dataset.id):await sb.from('departamentos').insert({...d,empresa_id:f.empresa.value});
+    if(error)throw error;await carregarDeptos();S.usuarios=null;fecharDrawer();toast('Departamento salvo.');render(true)},
+};
+const ACOES_PES={
+  'novo-colab':()=>formColab(),
+  'editar-colab':async b=>{S._colab=(await dadosPessoas()).colab;formColab(b.dataset.id)},
+  'excluir-colab':async b=>{if(!confirm('Excluir este colaborador e todo o histórico de férias e ausências? Para quem saiu da empresa, prefira preencher a data de desligamento.'))return;const {error}=await sb.from('colaboradores').delete().eq('id',b.dataset.id);if(error)throw error;await aposPessoas('Colaborador excluído.')},
+  'nova-aus':async b=>{const D=await dadosPessoas();S._colab=D.colab;S._aus=D.aus;formAus(null,b.dataset.colab,b.dataset.tipo)},
+  'editar-aus':async b=>{const D=await dadosPessoas();S._colab=D.colab;S._aus=D.aus;formAus(b.dataset.id)},
+  'excluir-aus':async b=>{if(!confirm('Excluir este registro?'))return;const {error}=await sb.from('ausencias').delete().eq('id',b.dataset.id);if(error)throw error;await aposPessoas('Registro excluído.')},
+  'novo-depto':b=>formDepto(null,b.dataset.emp),
+  'editar-depto':b=>formDepto(b.dataset.id),
+  'excluir-depto':async b=>{if(!confirm('Excluir este departamento? Colaboradores e usuários dele ficam sem departamento.'))return;const {error}=await sb.from('departamentos').delete().eq('id',b.dataset.id);if(error)throw error;await carregarDeptos();S.usuarios=null;await aposPessoas('Departamento excluído.')},
+};
 </script>
 <script>
 // ===================== navegação e filtros
 const ROTAS=[
- ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['boletos','Boletos do e-mail'],['lancamentos','Lançamentos'],
+['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['boletos','Boletos do e-mail'],['lancamentos','Lançamentos'],
  ['g','Controle'],['auditoria','Extratos e conciliação'],['nfs','Notas fiscais',1],['estoque','Estoque',1],
  ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],['salario','Salário líquido (PF)'],
- ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['bancos','Contas bancárias'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
+ ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e unidades'],['bancos','Contas bancárias'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários'],
+ ['g','Pessoas'],['pessoas','Colaboradores'],['ausencias','Férias e ausências'],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,boletos:vBoletos,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario,auditoria:vExtratos};
-const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','boletos','faturamento']);
-function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,boletos:vBoletos,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario,auditoria:vExtratos,pessoas:vPessoas,ausencias:vAusencias};
+const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento','pessoas','ausencias']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','boletos','faturamento','pessoas','ausencias']);
+function rota(){const h=location.hash.slice(1);return TITULOS[h]&&podeVer(h)?h:'painel'}
 function renderNav(r){
-  document.getElementById('nav').innerHTML=ROTAS.filter(x=>!x[3]||S.master).map(([id,n,soon])=>id==='g'?`<div class="nav-group">${n}</div>`:`<a href="#${id}" class="${id===r?'on':''}"><span class="nl">${icone(id)}<span>${n}</span></span>${soon?'<span class="soon">em breve</span>':''}</a>`).join('');
+  document.getElementById('nav').innerHTML=ROTAS.filter(x=>x[0]==='g'||podeVer(x[0])).filter((x,i,a)=>x[0]!=='g'||(a[i+1]&&a[i+1][0]!=='g')).map(([id,n,soon])=>id==='g'?`<div class="nav-group">${n}</div>`:`<a href="#${id}" class="${id===r?'on':''}"><span class="nl">${icone(id)}<span>${n}</span></span>${soon?'<span class="soon">em breve</span>':''}</a>`).join('');
   document.getElementById('sideFoot').innerHTML=`<div style="display:flex;flex-direction:column;gap:4px"><span style="overflow-wrap:anywhere">${esc(S.perfil?.nome||'')}${S.master?' · master':''}<br>${esc(S.user?.email||'')}</span>${S.empresas.length>1?'<span><button class="linkbtn small" data-acao="trocar-empresa" style="color:var(--side-ink)">Trocar empresa</button></span>':''}<span><button class="linkbtn small" data-acao="alterar-senha" style="color:var(--side-ink)">Alterar senha</button> · <button class="linkbtn small" data-acao="sair" style="color:var(--side-ink)">Sair</button></span></div>`;
 }
 function txtFiltro(){const es=selEmp(),us=selUn(),all=unidades();if(!S.empresas.length)return 'Sem empresas';
-  return es.length===S.empresas.length&&us.length===all.length?(S.empresas.length>1?`Todas as empresas <small>${S.empresas.length} empresas · ${S.predios.length} prédios</small>`:esc(nomeEmp(es[0]))+' <small>todos os prédios</small>'):es.length===1?`${esc(nomeEmp(es[0]))} <small>${us.length} unidade${us.length>1?'s':''}</small>`:`${es.map(e=>esc(nomeEmp(e))).join(' + ')} <small>${us.length} unidades</small>`}
+  return es.length===S.empresas.length&&us.length===all.length?(S.empresas.length>1?`Todas as empresas <small>${S.empresas.length} empresas · ${S.predios.length} unidades</small>`:esc(nomeEmp(es[0]))+' <small>todas as unidades</small>'):es.length===1?`${esc(nomeEmp(es[0]))} <small>${us.length} unidade${us.length>1?'s':''}</small>`:`${es.map(e=>esc(nomeEmp(e))).join(' + ')} <small>${us.length} unidades</small>`}
 function renderPop(){
   const b=document.getElementById('fEmp').getBoundingClientRect();
   const left=Math.max(16,Math.min(b.left+scrollX,innerWidth-356+scrollX));
@@ -2494,7 +2775,7 @@ async function entrar(user){
   const {data:perfil,error}=await sb.from('perfis').select('*').eq('usuario_id',user.id).maybeSingle();
   if(error){telaAuth('login',traduz(error));return}
   if(perfil&&!perfil.ativo){await sb.auth.signOut();telaAuth('login','Seu acesso foi desativado. Fale com o administrador.');return}
-  S.perfil=perfil;S.master=!!perfil?.master;
+  S.perfil=perfil;S.master=!!perfil?.master;S.pes=null;S.usuarios=null;
   document.getElementById('auth').hidden=true;document.getElementById('app').hidden=false;
   document.getElementById('brandLogo').innerHTML=LOGO;document.getElementById('brandSub').textContent=S.master?APP_SUB+' · master':APP_SUB;
   document.getElementById('view').innerHTML='<div class="panel empty">Carregando…</div>';
@@ -2559,18 +2840,11 @@ const FORMS={
   async empresa(f){const cnpj=soDig(f.cnpj.value);if(cnpj.length!==14)return toast('O CNPJ precisa ter 14 dígitos.');
     const {error}=await sb.rpc('criar_empresa',{p_cnpj:cnpj,p_razao_social:f.razao.value.trim(),p_nome_fantasia:f.fantasia.value.trim()||null});if(error)throw error;
     S.sel=new Set();fecharDrawer();toast('Empresa criada com plano de contas padrão.');S.usuarios=null;await recarregarCad()},
-  async predio(f){const {error}=await sb.from('predios').insert({empresa_id:f.dataset.emp,nome:f.nome.value.trim(),endereco:f.endereco.value.trim()||null});if(error)throw error;fecharDrawer();toast('Prédio cadastrado.');await recarregarCad()},
+  async predio(f){const {error}=await sb.from('predios').insert({empresa_id:f.dataset.emp,nome:f.nome.value.trim(),endereco:f.endereco.value.trim()||null});if(error)throw error;fecharDrawer();toast('Unidade cadastrada.');await recarregarCad()},
   async banco(f){const s=parseValor(f.saldo.value);const {error}=await sb.from('contas_bancarias').insert({empresa_id:f.dataset.emp,banco_nome:f.banco.value.trim(),banco_codigo:f.codigo.value.trim()||null,agencia:f.agencia.value.trim(),conta:f.conta.value.trim(),predio_id:f.predio.value||null,saldo_inicial:isNaN(s)?0:s,data_saldo_inicial:f.data.value||null});if(error)throw error;fecharDrawer();toast('Conta bancária cadastrada.');await recarregarCad()},
   async centro(f){const {error}=await sb.from('centros_custo').insert({empresa_id:f.dataset.emp,codigo:f.codigo.value.trim().toUpperCase(),nome:f.nome.value.trim(),responsavel:f.responsavel.value.trim()||null});if(error)throw error;fecharDrawer();toast('Centro de custo cadastrado.');await recarregarCad()},
-  async usuario(f){
-    const empresas=[...f.querySelectorAll('[data-ue]:checked')].map(x=>x.dataset.ue);
-    const predios=[...f.querySelectorAll('[data-up]:checked')].filter(x=>empresas.includes(x.dataset.emp)).map(x=>x.dataset.up);
-    const base={nome:f.nome.value.trim(),papel:f.papel.value,empresas,predios};
-    if(f.dataset.uid){await chamarAdmin({acao:'atualizar',usuario_id:f.dataset.uid,ativo:f.ativo.checked,...base});toast('Acesso atualizado.')}
-    else{if(!empresas.length)return toast('Marque pelo menos uma empresa.');const r=await chamarAdmin({acao:'convidar',email:f.email.value.trim(),redirectTo:BASE_URL,...base});if(r?.link){S.usuarios=null;mostrarLink(f.email.value.trim(),r.link,true);return}toast('Convite enviado para '+f.email.value.trim()+'.')}
-    S.usuarios=null;fecharDrawer();render()},
 };
-Object.assign(FORMS,FORMS_FAT,FORMS_ORC,FORMS_FX,FORMS_MARCA,FORMS_PF);
+Object.assign(FORMS,FORMS_FAT,FORMS_ORC,FORMS_FX,FORMS_MARCA,FORMS_PF,FORMS_PES);
 // ===================== eventos
 document.addEventListener('submit',async ev=>{const f=ev.target;const fn=FORMS[f.dataset.form];if(!fn)return;ev.preventDefault();busy(f,true);
   try{await fn(f)}catch(err){console.error(err);toast(traduz(err))}finally{if(document.body.contains(f))busy(f,false)}});
@@ -2579,15 +2853,18 @@ document.getElementById('fEmp').onclick=ev=>{ev.stopPropagation();document.getEl
 document.getElementById('fAno').onchange=ev=>{S.ano=+ev.target.value;render()};
 document.getElementById('fPer').onchange=ev=>{S.per.v=+ev.target.value;render()};
 document.addEventListener('paste',ev=>{if(ev.target.dataset?.cel)colarGrade(ev)});
-document.addEventListener('input',ev=>{if(ev.target.id==='fxBusca'){const q=norm(ev.target.value);document.querySelectorAll('[data-fxbox=pf] label').forEach(l=>l.hidden=q&&!norm(l.textContent).includes(q));return}if(ev.target.dataset?.cel){marcaCel(ev.target);return}if(ev.target.form?.dataset.form==='fat'){previewFat(ev.target.form);return}if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
+document.addEventListener('input',ev=>{if(ev.target.id==='fxBusca'){const q=norm(ev.target.value);document.querySelectorAll('[data-fxbox=pf] label').forEach(l=>l.hidden=q&&!norm(l.textContent).includes(q));return}if(ev.target.dataset?.cel){marcaCel(ev.target);return}if(ev.target.form?.dataset.form==='fat'){previewFat(ev.target.form);return}if(ev.target.id==='pesBusca'){S.pesBusca=ev.target.value;clearTimeout(S._pb);S._pb=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('pesBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300);return}if(ev.target.id==='lancBusca'){S.lancBusca=ev.target.value;clearTimeout(S._bt);S._bt=setTimeout(async()=>{const pos=ev.target.selectionStart;await render(true);const i=document.getElementById('lancBusca');if(i){i.focus();i.setSelectionRange(pos,pos)}},300)}});
 document.addEventListener('change',ev=>{const t=ev.target;
   if(t.id==='arqImp'&&t.files[0])lerPlanilha(t.files[0]);
   else if(t.id==='planoEmp'){S.planoEmp=t.value;render()}
   else if(t.id==='tribEmp'){S.tribEmp=t.value;render()}
   else if(t.dataset.cel)return;
   else if(t.id==='orcEmp'){if(S.orcEdit?.sujo&&!S._descarta){toast('Há valores não salvos. Salve antes de trocar.');t.value=S.orcEmp;return}S.orcEmp=t.value;S.orcVer=null;S.orcEdit=null;render()}
-  else if(t.id==='orcPredio'){if(S.orcEdit?.sujo){toast('Salve antes de trocar de prédio.');t.value=S.orcPredio??'*';return}S.orcPredio=t.value;S.orcEdit=null;render(true)}
+  else if(t.id==='orcPredio'){if(S.orcEdit?.sujo){toast('Salve antes de trocar de unidade.');t.value=S.orcPredio??'*';return}S.orcPredio=t.value;S.orcEdit=null;render(true)}
   else if(t.id==='premEmp'){S.premEmp=t.value;render()}
+  else if(t.id==='ausMes'){S.ausMes=+t.value;render(true)}
+  else if(t.id==='usrEmp'){S.usrEmp=t.value;render(true)}
+  else if(t.dataset.trocaPes)trocaEmpPes(t);
   else if(t.id==='acOrc'){S.acOrc=t.value;render(true)}
   else if(t.id==='acFc'){S.acFc=t.value||'-';render(true)}
   else if(t.id==='acAte'){S.acAte=+t.value;render(true)}
@@ -2609,6 +2886,7 @@ document.addEventListener('click',async ev=>{
     S.per={tipo:t,v:t==='tri'?Math.floor(base/3):t==='mes'?base:0};render();return}
   const dr=ev.target.closest('[data-dre]');if(dr){S.dreModo=dr.dataset.dre;render(true);return}
   const ab=ev.target.closest('[data-abre]');if(ab){const k_=ab.dataset.abre;S.abertos.has(k_)?S.abertos.delete(k_):S.abertos.add(k_);render(true);return}
+  const pf=ev.target.closest('[data-pesfiltro]');if(pf){S.pesFiltro=pf.dataset.pesfiltro;render(true);return}
   const cp=ev.target.closest('[data-cp]');if(cp){S.cpLado=cp.dataset.cp;render(true);return}
   const vb=ev.target.closest('[data-ver]');if(vb){if(S.orcEdit?.sujo){toast('Há valores não salvos. Salve antes de trocar de versão.');return}S.orcVer=vb.dataset.ver;S.orcEdit=null;S.acOrc=S.acFc=null;render(true);return}
   const ot=ev.target.closest('[data-orctab]');if(ot){S.orcTab=ot.dataset.orctab;render(true);return}
@@ -2633,12 +2911,13 @@ document.addEventListener('click',async ev=>{
   else if(formsCad[a])drawer(formsCad[a](b.dataset.emp));
   else if(a==='importar'){b.disabled=true;await executarImport()}
   else if(a==='desfazer-imp')await desfazerImport(b.dataset.id);
-  else if(a==='convidar')formUsuario();
+  else if(a==='convidar')formUsuario(null,b.dataset.emp);
   else if(a==='editar-usuario')formUsuario(b.dataset.uid);
   else if(ACOES_FAT[a])await ACOES_FAT[a](b);
   else if(ACOES_ORC[a])await ACOES_ORC[a](b);
   else if(ACOES_PF[a])await ACOES_PF[a](b);
   else if(ACOES_EXT[a])await ACOES_EXT[a](b);
+  else if(ACOES_PES[a])await ACOES_PES[a](b);
   else if(a==='limpar-fx'){S.fx={cc:new Set(),pf:new Set(),ct:new Set()};fecharDrawer();atualizaFxBtn();render()}
   else if(a==='gerar-link'){b.disabled=true;const r=await chamarAdmin({acao:'link',email:b.dataset.email,redirectTo:BASE_URL});mostrarLink(b.dataset.email,r.link,false)}
   else if(a==='copiar-link'){const t=document.getElementById('linkAcesso');try{await navigator.clipboard.writeText(t.value);toast('Link copiado.')}catch(e){t.select();toast('Selecionei o link: copie com o menu do celular.')}}

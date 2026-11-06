@@ -27,8 +27,13 @@ const boletos=[{id:id(),empresa_id:empresas[0].id,chave:'a',status:'novo',remete
  {id:id(),empresa_id:empresas[0].id,chave:'b',status:'novo',remetente:'Sabesp <conta@sabesp.com.br>',assunto:'Conta de água · outubro',recebido_em:'2026-10-28T09:00:00Z',linha_digitavel:'836200000011599000480107053120261123000000000005',valor:159.9,vencimento:'2026-11-01',beneficiario:'Sabesp',criado_em:'2026-10-28T10:00:00Z'},
  {id:id(),empresa_id:empresas[0].id,chave:'c',status:'novo',remetente:'Escola Aprender <financeiro@aprender.com>',assunto:'Boleto mensalidade novembro',recebido_em:'2026-11-04T09:00:00Z',linha_digitavel:null,valor:null,vencimento:null,observacao:'Não consegui ler o PDF (pode ter senha). Confira o anexo no e-mail.',criado_em:'2026-11-04T10:00:00Z'},
  {id:id(),empresa_id:empresas[0].id,chave:'d',status:'ignorado',remetente:'Loja X',assunto:'Boleto de exemplo',valor:89,vencimento:'2026-10-15',criado_em:'2026-10-10T10:00:00Z'}];
-const DB={boletos_email:boletos,boletos_email_token:[],acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[],extratos:[],extrato_linhas:[],regras_classificacao:[]};
-const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]}];
+const deps=[['Financeiro',0],['Operação',0],['Comercial',0],['Administração',1]].map(([n,ei])=>({id:id(),empresa_id:empresas[ei].id,nome:n,ativo:true,responsavel:null,centro_custo_id:null}));
+const colabs=[['Carla Mendes','Analista financeira',0,0,'2021-03-15',5200,'1990-11-12'],['Diego Ramos','Barista',1,0,'2024-08-01',2300,'1998-04-02'],['Elisa Prado','Gerente de loja',1,1,'2019-06-10',6800,null],['Fábio Lima','Vendedor',2,0,'2025-09-20',2600,null],['Gabi Torres','Atendente',1,1,'2023-01-09',2100,'2001-11-30'],['Hugo Alves','Zelador',3,2,'2022-02-01',2400,null],['Iris Nunes','Auxiliar',1,0,'2026-09-01',2000,null]].map(([n,c,d,pi,adm,sal,nasc])=>({id:id(),empresa_id:predios[pi].empresa_id,departamento_id:deps[d].id,predio_id:predios[pi].id,nome:n,cargo:c,admissao:adm,salario:sal,nascimento:nasc,contrato:'clt',desligamento:null}));
+colabs[0].ferias_quitadas_ate='2025-03-14';colabs[2].ferias_quitadas_ate='2024-06-09';colabs[4].ferias_quitadas_ate='2025-01-08';
+colabs.push({id:id(),empresa_id:empresas[0].id,departamento_id:deps[2].id,predio_id:predios[0].id,nome:'João Saiu',cargo:'Vendedor',admissao:'2022-05-01',desligamento:'2026-04-30',salario:2500,contrato:'clt'});
+const aus=[[0,'ferias','2026-01-05','2026-01-24'],[1,'atestado','2026-03-10','2026-03-12'],[2,'ferias','2026-11-03','2026-11-17'],[4,'atestado','2026-11-04','2026-11-05'],[3,'falta','2026-10-14','2026-10-14'],[5,'afastamento','2026-06-01','2026-07-15'],[1,'ferias','2025-12-01','2025-12-20']].map(([ci,t,i,f])=>({id:id(),empresa_id:colabs[ci].empresa_id,colaborador_id:colabs[ci].id,tipo:t,inicio:i,fim:f,dias:Math.round((new Date(f)-new Date(i))/864e5)+1,abono_dias:0,status:'aprovada'}));
+const DB={boletos_email:boletos,boletos_email_token:[],extratos:[],extrato_linhas:[],regras_classificacao:[],departamentos:deps,colaboradores:colabs,ausencias:aus,acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
+const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]},{usuario_id:id(),email:'rita@exemplo.com',nome:'Rita Lopes',master:false,ativo:true,ultimo_acesso:'2026-11-02T10:00:00Z',convite_aceito:true,outras_empresas:1,acessos:[{empresa_id:empresas[0].id,papel:'rh',departamento_id:deps[0].id,predios:[]}],empresas:[empresas[0].id],papel:'rh',predios:[]}];
 // ---------- PostgREST falso
 function filtrar(rows,q){
   for(const [k,v] of q){if(['select','order','limit','offset'].includes(k))continue;const [op,...r]=v.split('.');const val=r.join('.');
@@ -52,7 +57,7 @@ async function rotear(route){const req=route.request();const u=new URL(req.url()
   if(m==='GET'){let rows=filtrar(tab,u.searchParams);rows=embutir(t,rows,u.searchParams.get('select')||'');
     const rg=req.headers()['range'];if(rg){const [a,b]=rg.split('-').map(Number);rows=rows.slice(a,b+1)}
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(rows[0]||null);return J(rows)}
-  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();x.criado_em=x.criado_em||new Date().toISOString();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
+  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();if(t==='ausencias'){x.dias=Math.round((new Date(x.fim)-new Date(x.inicio))/864e5)+1;x.empresa_id=colabs.find(c=>c.id===x.colaborador_id)?.empresa_id}x.criado_em=x.criado_em||new Date().toISOString();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(arr[0],201);return J(arr,201)}
   if(m==='PATCH'){const b=req.postDataJSON();filtrar(tab,u.searchParams).forEach(x=>Object.assign(x,b));log.push('update '+t);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
   if(m==='DELETE'){const del=new Set(filtrar(tab,u.searchParams));for(let i=tab.length-1;i>=0;i--)if(del.has(tab[i]))tab.splice(i,1);log.push('delete '+t+' '+del.size);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
@@ -105,6 +110,16 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     // usuários
     await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(600);await pg.click('[data-acao=convidar]');await pg.waitForTimeout(200);await shot(pg,'convite');
     await pg.fill('#uNome','Bruno');await pg.fill('#uEmail','bruno@exemplo.com');await pg.check(`[data-up="${predios[2].id}"]`);await pg.click('form[data-form=usuario] button:not([type=button])');await pg.waitForTimeout(600);await shot(pg,'link-acesso');
+    // gestão de pessoas
+    await pg.evaluate(()=>location.hash='pessoas');await pg.waitForTimeout(800);await shot(pg,'pessoas');
+    await pg.click('[data-acao=novo-colab]');await pg.waitForTimeout(200);await shot(pg,'colab-form');await pg.fill('#cNome','Joana Teste');await pg.fill('#cCpf','123.456.789-01');await pg.fill('#cSal','3.100,00');await pg.fill('#cAdm','2025-01-02');await pg.click('form[data-form=colab] button:not([type=button])');await pg.waitForTimeout(700);
+    if(!colabs.some(c=>c.nome==='Joana Teste'&&c.salario===3100&&c.cpf==='12345678901'))errs.push('colaborador não gravou');
+    await pg.click('[data-pesfiltro=desligados]');await pg.waitForTimeout(400);await shot(pg,'pessoas-desligados');await pg.click('[data-pesfiltro=ativos]');await pg.waitForTimeout(300);
+    await pg.evaluate(()=>location.hash='ausencias');await pg.waitForTimeout(800);await shot(pg,'ausencias');
+    await pg.click('[data-acao=nova-aus]:not([data-colab])');await pg.waitForTimeout(300);await shot(pg,'aus-form');await pg.fill('#aIni','2026-11-20');await pg.fill('#aFim','2026-11-21');await pg.click('form[data-form=aus] button:not([type=button])');await pg.waitForTimeout(700);
+    if(aus.length!==8)errs.push('ausência não gravou: '+aus.length);
+    await pg.selectOption('#ausMes','5');await pg.waitForTimeout(500);await shot(pg,'ausencias-junho');
+    await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(600);await pg.click(`[data-acao=editar-usuario]`);await pg.waitForTimeout(300);await shot(pg,'usuario-editar');await pg.click('[data-acao=fechar]');
     // empresa nova
     await pg.evaluate(()=>location.hash='empresas');await pg.waitForTimeout(500);await pg.click('[data-acao=nova-empresa]');await pg.fill('#eCnpj','11.111.111/0001-11');await pg.fill('#eRazao','Teste SA');await pg.click('form[data-form=empresa] button:not([type=button])');await pg.waitForTimeout(800);
     // faturamento
@@ -179,8 +194,18 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.waitForTimeout(600);await shot(pg,'import-conf');await pg.click('[data-acao=importar]');await pg.waitForTimeout(1500);await shot(pg,'import-feito');
   });
   await rodar({width:390,height:844},'mob',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForSelector('[data-entra]',{timeout:8000});await shot(pg,'m-entrada');await pg.click('[data-entra="*"]');await pg.waitForSelector('.tile',{timeout:8000});await shot(pg,'m-painel');await pg.evaluate(()=>location.hash='boletos');await pg.waitForTimeout(800);await shot(pg,'m-boletos');
-    for(const r of ['dre','usuarios','importar','orcamento','premissas','bancos','auditoria']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}
+    for(const r of ['dre','usuarios','importar','orcamento','premissas','bancos','auditoria','pessoas','ausencias']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}
     await pg.evaluate(()=>{location.hash='salario'});await pg.waitForTimeout(500);await pg.fill('#salBruto','5900');await pg.press('#salBruto','Enter');await pg.waitForTimeout(700);await shot(pg,'m-salario')});
+  // administrador da empresa: vê Usuários e Pessoas só da própria empresa
+  perfis[0].master=false;empresas.splice(1);DB.lancamentos=lanc.filter(l=>l.empresa_id===empresas[0].id);DB.usuarios_empresas.splice(0,DB.usuarios_empresas.length,{usuario_id:UID,empresa_id:empresas[0].id,papel:'admin'});
+  usuarios.splice(0,usuarios.length,{...perfis[0],acessos:[{empresa_id:empresas[0].id,papel:'admin',departamento_id:deps[0].id,predios:[]}],convite_aceito:true},usuarios[1]);
+  await rodar({width:1366,height:900},'admemp',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForTimeout(1500);const en=await pg.$('[data-entra]');if(en){await en.click();await pg.waitForTimeout(800)}
+    const nav=await pg.$$eval('#nav a',as=>as.map(a=>a.getAttribute('href')));if(!nav.includes('#usuarios')||!nav.includes('#pessoas'))errs.push('admin da empresa sem menu: '+nav.join(','));
+    await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(800);await shot(pg,'adm-usuarios');
+    if(await pg.$('text=Equipe master'))errs.push('admin da empresa vê a equipe master');
+    await pg.click('[data-acao=convidar]');await pg.waitForTimeout(300);await shot(pg,'adm-convite');
+    const n=await pg.$$eval('[data-ue]',x=>x.length);if(n!==1)errs.push('admin vê '+n+' empresas no convite');
+    await pg.evaluate(()=>location.hash='pessoas');await pg.waitForTimeout(800);await shot(pg,'adm-pessoas')});
   await b.close();srv.close();
   console.log('LOG',log.join(' | '));console.log('ORC',DB.orcamento_versoes.map(v=>v.nome+' '+v.tipo+' trav:'+v.congelada).join('; '),'linhas',DB.orcamento_linhas.length,'caixa',DB.orcamento_caixa.length,'premissa1',JSON.stringify(premissas[0].prazos_dias));console.log('ERROS',errs.length?errs.join('\n'):'nenhum');
   const novos=lanc.filter(l=>l.importacao_id);console.log('importados',novos.length,novos.map(l=>l.valor+' '+l.competencia+' cc:'+(centros.find(c=>c.id===l.centro_custo_id)?.nome)+' parc:'+(parceiros.find(p=>p.id===l.parceiro_id)?.nome)).join(' ; '));

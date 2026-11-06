@@ -115,7 +115,7 @@ const recebidoPct=(D,p)=>{const it=itensDe(D,p);const t=sum(it.map(i=>+i.quantid
 async function evento(p,etapa,descricao){const {error}=await sb.from('compras_eventos').insert({empresa_id:p.empresa_id,pedido_id:p.id,etapa,descricao,usuario:quem()});if(error)throw error}
 async function atualiza(p,campos){const {error}=await sb.from('compras_pedidos').update(campos).eq('id',p.id);if(error)throw error}
 
-// ---------- verba do orçamento travado (conta + prédio, mês e acumulado no ano)
+// ---------- verba do orçamento travado (conta + unidade, mês e acumulado no ano)
 async function verba(D,p,valor){
   const ano=+p.competencia.slice(0,4),m=+p.competencia.slice(5,7);
   const vs=(await versoesDe(p.empresa_id)).filter(v=>v.ano===ano&&v.tipo!=='forecast'&&v.congelada).sort((a,b)=>String(b.congelada_em||'').localeCompare(String(a.congelada_em||'')));
@@ -286,7 +286,7 @@ function comparativo(D,p,its,cots,ed){
 const contasDesp=emp=>S.contas.filter(c=>c.empresa_id===emp&&c.analitica&&c.ativa&&c.tipo==='despesa').sort((a,b)=>a.codigo.localeCompare(b.codigo,undefined,{numeric:true}));
 function opcoesPedido(emp){
   const cs=contasDesp(emp);const pad=cs.find(c=>c.grupo_dre==='custos')||cs[0];
-  return {pred:`<option value="">${S.predios.some(p=>p.empresa_id===emp)?'Sem prédio definido':'Empresa toda'}</option>`+S.predios.filter(p=>p.empresa_id===emp).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join(''),
+  return {pred:`<option value="">${S.predios.some(p=>p.empresa_id===emp)?'Sem unidade definida':'Empresa toda'}</option>`+S.predios.filter(p=>p.empresa_id===emp).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join(''),
     contas:cs.map(c=>`<option value="${c.id}" ${c===pad?'selected':''}>${esc(c.codigo)} ${esc(c.nome)}</option>`).join(''),
     cc:'<option value="">Sem centro de custo</option>'+S.centros.filter(c=>c.empresa_id===emp).map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join(''),
     prods:(C.produtos||[]).filter(p=>p.empresa_id===emp).map(p=>`<option value="${esc(p.codigo)} · ${esc(p.nome)}">`).join('')};
@@ -306,7 +306,7 @@ async function formPedido(){
   <form data-form="cmp-pedido" class="form-grid">
     <div class="field wide"><label for="cTit">O que precisa comprar</label><input id="cTit" name="titulo" required placeholder="Ex.: Reposição de café em grãos para dezembro"></div>
     <div class="field"><label for="cEmp">Empresa</label><select id="cEmp" name="empresa" data-cmp-emp>${S.empresas.filter(e=>podeEditar(e.id)).map(e=>`<option value="${e.id}" ${e.id===emp.id?'selected':''}>${esc(nomeEmp(e))}</option>`).join('')}</select></div>
-    <div class="field"><label for="cPred">Prédio</label><select id="cPred" name="predio">${o.pred}</select></div>
+    <div class="field"><label for="cPred">Unidade</label><select id="cPred" name="predio">${o.pred}</select></div>
     <div class="field"><label for="cCC">Centro de custo</label><select id="cCC" name="centro">${o.cc}</select></div>
     <div class="field wide"><label for="cConta">Conta do orçamento</label><select id="cConta" name="conta" required>${o.contas}</select></div>
     <div class="field"><label for="cComp">Competência (mês da verba)</label><input id="cComp" name="competencia" type="month" required value="${HOJE.slice(0,7)}"></div>
@@ -493,9 +493,9 @@ async function vEstoque(){
   const ed=podeEditarAlguma();
   const origem=m=>{if(m.compra_item_id){const it=D.itens.find(i=>i.id===m.compra_item_id);const p=it&&D.ped.find(x=>x.id===it.pedido_id);return p?`<button class="linkbtn small" data-pc="${p.id}">${numPC(p)}</button>`:'Compra'}return m.nf_item_id?'Nota fiscal':'Manual'};
   return `<section class="grid g-tiles">${tiles.map(t=>`<div class="tile"><div class="lbl">${tic(t[3],t[4])}${t[0]}</div><div class="val">${t[1]}</div><div class="cmp">${t[2]}</div></div>`).join('')}</section>
-  <div class="panel"><div class="ph"><div><h2>Saldo por produto e prédio</h2><p class="hint">${esc(escopo())} · entradas das compras entregues, notas e movimentos manuais</p></div>
+  <div class="panel"><div class="ph"><div><h2>Saldo por produto e unidade</h2><p class="hint">${esc(escopo())} · entradas das compras entregues, notas e movimentos manuais</p></div>
     ${ed?`<div class="acts-row"><button class="btn ghost" data-c="novo-produto">+ Produto</button><button class="btn" data-c="nova-mov">Movimentar estoque</button></div>`:''}</div>
-    ${linhas.length?`<div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Prédio</th><th class="n">Saldo</th><th class="n">Custo médio</th><th class="n">Valor</th><th class="n">Mínimo</th><th>Última mov.</th></tr></thead><tbody>
+    ${linhas.length?`<div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Unidade</th><th class="n">Saldo</th><th class="n">Custo médio</th><th class="n">Valor</th><th class="n">Mínimo</th><th>Última mov.</th></tr></thead><tbody>
     ${linhas.map(g=>{const min=g.p.estoque_minimo!=null?+g.p.estoque_minimo:null;const baixo=min!=null&&porProd[g.produto_id]<min;
       return `<tr><td>${esc(g.p.codigo)} · ${esc(g.p.nome)}${S.empresas.length>1?`<span class="unit">${esc(nomeEmp(empresa(g.empresa_id)))}</span>`:''}</td><td>${esc(predio(g.predio_id)?.nome||'Sem prédio')}</td><td class="n ${g.q<0?'neg':''}">${qtd.format(g.q)} ${esc(g.p.unidade||'')}</td><td class="n">${brl2.format(g.cm)}</td><td class="n">${num.format(Math.round(Math.max(0,g.q)*g.cm))}</td><td class="n">${min!=null?qtd.format(min)+(baixo?' <span class="chip bad">baixo</span>':''):'–'}</td><td>${dataBR(g.ult)}</td></tr>`}).join('')}
     <tr class="tot"><td colspan="4">Total</td><td class="n">${num.format(Math.round(valor))}</td><td colspan="2"></td></tr></tbody></table></div>`:`<div class="empty"><b>Estoque vazio</b>As entradas chegam pela esteira de compras (ao registrar a entrega) ou por “Movimentar estoque”.</div>`}</div>
@@ -513,7 +513,7 @@ function formMov(){const prods=(C.produtos||[]).filter(p=>podeEditar(p.empresa_i
   <div class="field wide"><label for="mPrd">Produto</label><select id="mPrd" name="produto">${prods.map(p=>`<option value="${p.id}">${esc(p.codigo)} · ${esc(p.nome)}${S.empresas.length>1?' ('+esc(nomeEmp(empresa(p.empresa_id)))+')':''}</option>`).join('')}</select></div>
   <div class="field"><label for="mTipo">Tipo</label><select id="mTipo" name="tipo"><option value="saida">Saída (consumo/venda)</option><option value="entrada">Entrada</option><option value="ajuste">Ajuste (soma)</option></select></div>
   <div class="field"><label for="mQtd">Quantidade</label><input id="mQtd" name="qtd" inputmode="decimal" required></div><div class="field"><label for="mData">Data</label><input id="mData" name="data" type="date" value="${HOJE}" required></div>
-  <div class="field"><label for="mPred">Prédio</label><select id="mPred" name="predio"><option value="">Sem prédio</option>${S.predios.map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select></div>
+  <div class="field"><label for="mPred">Unidade</label><select id="mPred" name="predio"><option value="">Sem unidade</option>${S.predios.map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select></div>
   <div class="field"><label for="mCu">Custo unitário (entrada)</label><input id="mCu" name="custo" inputmode="decimal"></div><div class="field"><label for="mObs">Observação</label><input id="mObs" name="obs"></div>
   <div class="wide acts-row"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)}
 
