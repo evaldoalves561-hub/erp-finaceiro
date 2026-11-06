@@ -70,7 +70,7 @@ const LOGIN='teste@exemplo.com';
   await pg.goto('http://localhost:8765/');await pg.waitForTimeout(400);
   const shot=async(n,p=pg)=>{await p.waitForTimeout(500);const ov=await p.evaluate(()=>document.documentElement.scrollWidth-innerWidth);if(ov>0)errs.push(n+': overflow horizontal '+ov+'px');await p.screenshot({path:`${OUT}/c-${n}.png`,fullPage:true})};
   const sub=async sel=>{await pg.click(sel+' button:not([type=button])');await pg.waitForTimeout(900)};
-  await pg.fill('#aEmail',LOGIN);await pg.fill('#aSenha','x12345678');await pg.click('form[data-form=login] button');await pg.waitForSelector('.tile',{timeout:8000});
+  await pg.fill('#aEmail',LOGIN);await pg.fill('#aSenha','x12345678');await pg.click('form[data-form=login] button');await pg.waitForTimeout(1200);{const en=await pg.$('[data-entra="*"]')||await pg.$('[data-entra]');if(en)await en.click()}await pg.waitForSelector('.tile',{timeout:8000});
   await pg.evaluate(()=>location.hash='compras');await pg.waitForTimeout(900);await shot('vazio');
   // 1. pedido
   await pg.click('[data-c=novo-pedido]');await pg.waitForTimeout(300);
@@ -106,7 +106,7 @@ const LOGIN='teste@exemplo.com';
   await pg.evaluate(()=>location.hash='estoque');await pg.waitForTimeout(1000);await shot('estoque');
   await pg.evaluate(()=>location.hash='contas');await pg.waitForTimeout(1000);await shot('contas');
   const m=await b.newContext({viewport:{width:390,height:844}});const mp=await m.newPage();mp.on('pageerror',e=>errs.push('mob '+e.message));await mp.route('https://vovomhtwqfnlidqlmycu.supabase.co/**',rotear);await mp.route('https://fonts.googleapis.com/**',r=>r.abort());
-  await mp.goto('http://localhost:8765/#compras');await mp.waitForTimeout(400);await mp.fill('#aEmail',LOGIN);await mp.fill('#aSenha','x');await mp.click('form[data-form=login] button');await mp.waitForTimeout(2000);await shot('m-esteira',mp);
+  await mp.goto('http://localhost:8765/#compras');await mp.waitForTimeout(400);await mp.fill('#aEmail',LOGIN);await mp.fill('#aSenha','x');await mp.click('form[data-form=login] button');await mp.waitForTimeout(1200);{const en=await mp.$('[data-entra="*"]')||await mp.$('[data-entra]');if(en)await en.click()}await mp.waitForTimeout(2000);await shot('m-esteira',mp);
   await mp.click('.kc');await mp.waitForTimeout(800);await shot('m-detalhe',mp);
   await mp.evaluate(()=>location.hash='estoque');await mp.waitForTimeout(1000);await shot('m-estoque',mp);
   await b.close();srv.close();
