@@ -290,6 +290,7 @@ const IC={
  empresas:'<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4"/>',
  tributos:'<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
  importar:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+ buscar:'<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
  boletos:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><path d="M7 16v-3M10 16v-3M13 16v-3M16 16v-3"/>',
  bancos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M10 10v8M14 10v8M19 10v8M3 21h18"/>',
  salario:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/>',
@@ -619,6 +620,7 @@ async function vContas(){
   const venc=lado.filter(p=>p.vencimento<HOJE),sem=lado.filter(p=>p.vencimento>=HOJE&&p.vencimento<=addDias(HOJE,7)),mes=lado.filter(p=>p.vencimento.slice(0,7)===HOJE.slice(0,7));
   const tot=v=>brl.format(Math.abs(sum(v.map(p=>p.valor))));
   let avisoBol='';if(S.cpLado==='pagar'){const {count}=await sb.from('boletos_email').select('id',{count:'exact',head:true}).eq('status','novo').in('empresa_id',selEmp().map(e=>e.id));
+    avisoBol=count?'':`<div style="display:flex;justify-content:flex-end"><a class="btn ghost" href="#boletos">${icone('boletos',15)} Boletos do e-mail</a></div>`;
     if(count)avisoBol=`<div class="effect" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><span>${icone('boletos',15)} Chegaram <b>${count} boleto${count>1?'s':''}</b> por e-mail que ainda não viraram conta a pagar.</span><a class="btn ghost" href="#boletos">Ver boletos</a></div>`}
   return `${avisoBol}<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
     <div class="tile"><div class="lbl">Em aberto</div><div class="val">${tot(lado)}</div><div class="cmp">${lado.length} parcelas</div></div>
@@ -669,11 +671,11 @@ async function vBoletos(){
     <div class="tile"><div class="lbl">Boletos a lançar</div><div class="val">${novos.length}</div><div class="cmp">${tot(novos)}</div></div>
     <div class="tile"><div class="lbl">Vencidos sem lançar</div><div class="val">${tot(venc)}</div><div class="cmp">${venc.length?`<span class="chip bad">${venc.length} boleto${venc.length>1?'s':''}</span>`:'<span class="chip good">nenhum</span>'}</div></div>
     <div class="tile"><div class="lbl">Vence nos próximos 7 dias</div><div class="val">${tot(sem)}</div><div class="cmp">${sem.length} boleto${sem.length===1?'':'s'}</div></div>
-    <div class="tile"><div class="lbl">Última leitura do e-mail</div><div class="val" style="font-size:16px">${ult?quandoBol(ult):'Ainda não ligado'}</div><div class="cmp">${S.bolTokens.length?`<span class="chip good">Gmail ligado</span>`:'<span class="chip mute">Gmail desligado</span>'}</div></div></section>
+    <div class="tile"><div class="lbl">Última leitura do e-mail</div><div class="val" style="font-size:16px">${ult?quandoBol(ult):'Ainda não ligado'}</div><div class="cmp">${S.bolTokens.length?`<span class="chip good">Gmail ligado</span>${S.bolTokens.some(t=>t.url_busca)?'':' <span class="chip mute">sem botão</span>'}`:'<span class="chip mute">Gmail desligado</span>'}</div></div></section>
   <div class="panel"><div class="ph"><div><h2>Boletos para lançar</h2><p class="hint">Chegaram por e-mail. Clique em Lançar para virar conta a pagar, ou em Ignorar se não for seu.</p></div>
-    ${podeEditarAlguma()?`<button class="btn ghost" data-acao="bol-config">${icone('boletos',15)} Ligar o Gmail</button>`:''}</div>
+    <div class="ctrls">${S.bolTokens.some(t=>t.url_busca)?`<button class="btn" data-acao="bol-buscar">${icone('buscar',15)} Buscar boletos agora</button>`:''}${podeEditarAlguma()?`<button class="btn ghost" data-acao="bol-config">${icone('boletos',15)} ${S.bolTokens.length?'Configurar Gmail':'Ligar o Gmail'}</button>`:''}</div></div>
     ${novos.length?`<div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Situação</th><th>Beneficiário / e-mail</th>${multi?'<th>Empresa</th>':''}<th>Linha digitável</th><th class="n">Valor</th><th></th></tr></thead><tbody>${novos.map(linhaNovo).join('')}</tbody></table></div>`
-      :`<p class="muted" style="margin:0">${S.bolTokens.length?'Nenhum boleto novo. O e-mail é verificado a cada hora.':'Nenhum boleto ainda. Clique em “Ligar o Gmail” para o app buscar os boletos sozinho.'}</p>`}</div>
+      :`<p class="muted" style="margin:0">${S.bolTokens.length?'Nenhum boleto novo. O e-mail é verificado a cada hora'+(S.bolTokens.some(t=>t.url_busca)?', ou na hora pelo botão “Buscar boletos agora”.':'.'):'Nenhum boleto ainda. Clique em “Ligar o Gmail” para o app buscar os boletos sozinho.'}</p>`}</div>
   ${tratados.length?`<div class="panel"><div class="ph"><div><h2>Já tratados</h2><p class="hint">Últimos ${tratados.length}</p></div></div><div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Beneficiário / e-mail</th><th>Situação</th><th class="n">Valor</th><th></th></tr></thead><tbody>
     ${tratados.map(b=>`<tr><td class="mono">${dataBR(b.vencimento)||'–'}</td><td>${esc(b.beneficiario||b.remetente||'')}<span class="unit">${esc(b.assunto||'')}</span></td><td>${b.status==='lancado'?'<span class="chip good">Lançado</span>':'<span class="chip mute">Ignorado</span>'}</td><td class="n">${b.valor!=null?brl2.format(b.valor):'–'}</td>
     <td>${b.status==='ignorado'&&podeEditar(b.empresa_id)?`<button class="linkbtn small" data-acao="bol-voltar" data-id="${b.id}">Voltar para a lista</button>`:''}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
@@ -687,11 +689,12 @@ function formBolConfig(empId){
   drawer(`<h3>${icone('boletos')} Ligar o Gmail</h3>
   <p class="muted" style="margin:0">Um pequeno programa roda na sua própria conta Google, procura e-mails com boleto a cada hora e manda para cá a linha digitável, o valor e o vencimento. Nada é pago sozinho: cada boleto espera você lançar.</p>
   <div class="field wide"><label for="bolEmp">Os boletos entram na empresa</label><select id="bolEmp">${opcoesEmp(emp.id)}</select></div>
-  ${tk?`<div class="effect">Ligado${tk.ultimo_uso?' · última leitura '+quandoBol(tk.ultimo_uso):' · ainda não leu nenhum e-mail'}.</div>`:''}
+  ${tk?`<div class="effect">Ligado${tk.ultimo_uso?' · última leitura '+quandoBol(tk.ultimo_uso):' · ainda não leu nenhum e-mail'}. Botão “Buscar boletos agora”: ${tk.url_busca?'<b>ligado</b>':'desligado (veja o passo 4)'}.</div>`:''}
   <ol style="margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px">
     <li>${tk?'Copie o script desta empresa':'Gere o código desta empresa'} no botão abaixo.</li>
     <li>Abra <a href="https://script.google.com/create" target="_blank" rel="noopener">script.google.com</a> com a conta do Gmail dos boletos, apague o que estiver lá e cole.</li>
-    <li>No topo, escolha a função <b>instalar</b> e clique em <b>Executar</b>. Autorize o acesso que o Google pedir.</li></ol>
+    <li>No topo, escolha a função <b>instalar</b> e clique em <b>Executar</b>. Autorize o acesso que o Google pedir.</li>
+    <li>Para ter o botão <b>Buscar boletos agora</b>: em <b>Implantar › Nova implantação</b>, escolha <b>App da Web</b>, executar como <b>Eu</b> e acesso <b>Qualquer pessoa</b>. Depois execute <b>instalar</b> de novo. O script só busca quando recebe o código desta empresa.</li></ol>
   <div style="display:flex;gap:8px;flex-wrap:wrap">${tk?`<button class="btn" data-acao="bol-script" data-emp="${emp.id}">Copiar script</button><button class="btn ghost" data-acao="bol-novo-codigo" data-emp="${emp.id}">Trocar código</button>`:`<button class="btn" data-acao="bol-gerar" data-emp="${emp.id}">Gerar código e copiar script</button>`}<button class="btn ghost" data-acao="fechar">Fechar</button></div>
   <textarea id="bolScript" rows="3" readonly hidden style="font-size:11px"></textarea>
   <p class="muted small" style="margin:0">Trocar o código desliga o script antigo. Use se achar que alguém viu o código.</p>`);
@@ -699,8 +702,24 @@ function formBolConfig(empId){
 }
 async function copiarScript(empId){const tk=S.bolTokens.find(t=>t.empresa_id===empId);const txt=await scriptBoletos(tk.token);
   try{await navigator.clipboard.writeText(txt);toast('Script copiado. Agora cole em script.google.com.')}catch(e){const t=document.getElementById('bolScript');t.hidden=false;t.value=txt;t.select();toast('Selecionei o script: copie e cole em script.google.com.')}}
+async function buscarAgora(b){
+  const tks=S.bolTokens.filter(t=>t.url_busca);if(!tks.length)return;
+  b.disabled=true;const txt=b.innerHTML;b.innerHTML='Buscando no Gmail…';
+  const antes=Object.fromEntries(tks.map(t=>[t.empresa_id,t.ultimo_uso]));let conv=0,nov=0,okResp=0;
+  try{
+    await Promise.all(tks.map(async t=>{
+      try{const r=await fetch(t.url_busca,{method:'POST',body:JSON.stringify({token:t.token})});const j=await r.json();if(!j.ok)throw new Error(j.erro||'falhou');conv+=j.conversas||0;nov+=j.novos||0;okResp++}
+      catch(e){await fetch(t.url_busca,{method:'POST',mode:'no-cors',body:JSON.stringify({token:t.token})}).catch(()=>{})}}));
+    if(okResp<tks.length){// sem resposta direta: espera o script avisar que leu
+      for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,3000));const {data}=await sb.from('boletos_email_token').select('empresa_id,ultimo_uso').in('empresa_id',tks.map(t=>t.empresa_id));
+        if((data||[]).every(d=>d.ultimo_uso&&d.ultimo_uso!==antes[d.empresa_id]))break}}
+    toast(okResp===tks.length?(nov?`Pronto: ${nov} boleto${nov>1?'s':''} novo${nov>1?'s':''} (${conv} conversas verificadas).`:`Pronto: nenhum boleto novo (${conv} conversas verificadas).`):'Busca concluída.');
+  }finally{b.disabled=false;b.innerHTML=txt}
+  render(true);
+}
 const ACOES_BOL={
   'bol-config':()=>formBolConfig(),
+  'bol-buscar':b=>buscarAgora(b),
   async 'bol-gerar'(b){b.disabled=true;const {data,error}=await sb.from('boletos_email_token').upsert({empresa_id:b.dataset.emp},{onConflict:'empresa_id'}).select().single();if(error)throw error;
     S.bolTokens=[...S.bolTokens.filter(t=>t.empresa_id!==data.empresa_id),data];formBolConfig(data.empresa_id);await copiarScript(data.empresa_id)},
   async 'bol-novo-codigo'(b){if(!confirm('Trocar o código? O script que já está instalado para esta empresa para de funcionar até você colar o novo.'))return;

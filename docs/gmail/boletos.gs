@@ -9,13 +9,18 @@
  *  1. Em script.google.com crie um projeto novo e cole este arquivo inteiro.
  *  2. Escolha a função "instalar" e clique em Executar. Autorize o acesso pedido.
  * Pronto: ele verifica o e-mail a cada hora. Para parar, execute "desinstalar".
+ *
+ * Botão "Buscar agora" no app (opcional):
+ *  3. Implantar > Nova implantação > tipo "App da Web", executar como "Eu",
+ *     acesso "Qualquer pessoa". Depois execute "instalar" de novo.
  */
 const CONFIG = {
   SUPABASE_URL: '__SUPABASE_URL__',
   SUPABASE_KEY: '__SUPABASE_KEY__',
   TOKEN: '__TOKEN__',
-  // E-mails dos últimos 45 dias que falam de boleto e ainda não foram lidos por este script
-  BUSCA: '(boleto OR "linha digitável" OR "linha digitavel" OR "código de barras" OR "codigo de barras" OR fatura) newer_than:45d -label:gestor-boleto-lido -in:sent',
+  // E-mails dos últimos 45 dias que falam de boleto (no texto, no assunto ou no nome do PDF).
+  // Cada mensagem é lida uma vez só (o script guarda quais já leu), mesmo que a conversa receba e-mails novos.
+  BUSCA: '(boleto OR boletos OR filename:boleto OR "linha digitável" OR "linha digitavel" OR "código de barras" OR "codigo de barras" OR fatura OR faturas OR cobrança OR cobranca) newer_than:45d',
   ROTULO: 'gestor-boleto-lido',
   MAX_CONVERSAS: 40,
 };
@@ -23,7 +28,28 @@ const CONFIG = {
 function instalar() {
   desinstalar();
   ScriptApp.newTrigger('buscarBoletos').timeBased().everyHours(1).create();
+  registrarBotao();
   buscarBoletos();
+}
+
+// Se o script estiver publicado como app da web, avisa o app do endereço para o botão "Buscar agora".
+function registrarBotao() {
+  const url = ScriptApp.getService().getUrl();
+  if (!url || !/\/exec$/.test(url)) { console.log('Ainda não publicado como app da web: o botão "Buscar agora" fica desligado.'); return; }
+  chamarApp('registrar_busca_boletos', { p_token: CONFIG.TOKEN, p_url: url });
+  console.log('Botão "Buscar agora" ligado no app.');
+}
+
+// Chamado pelo botão "Buscar agora" do app. Só roda com o código certo.
+function doPost(e) {
+  let corpo = {};
+  try { corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (err) {}
+  if (corpo.token !== CONFIG.TOKEN) return resposta({ ok: false, erro: 'código inválido' });
+  return resposta(Object.assign({ ok: true }, buscarBoletos()));
+}
+
+function resposta(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
 function desinstalar() {
@@ -33,17 +59,32 @@ function desinstalar() {
 }
 
 function buscarBoletos() {
+  const trava = LockService.getScriptLock();
+  if (!trava.tryLock(20000)) return { conversas: 0, novos: 0, ocupado: true };
+  try { return buscar(); } finally { trava.releaseLock(); }
+}
+
+function buscar() {
   const rotulo = GmailApp.getUserLabelByName(CONFIG.ROTULO) || GmailApp.createLabel(CONFIG.ROTULO);
+  const props = PropertiesService.getScriptProperties();
+  let lidos = [];
+  try { lidos = JSON.parse(props.getProperty('lidos') || '[]'); } catch (e) {}
+  const jaLido = new Set(lidos);
   const conversas = GmailApp.search(CONFIG.BUSCA, 0, CONFIG.MAX_CONVERSAS);
-  let novos = 0;
+  let novos = 0, mensagens = 0;
   conversas.forEach(conv => {
     let ok = true;
     conv.getMessages().forEach(m => {
-      try { novos += processar(m); } catch (e) { ok = false; console.error(m.getSubject(), e); }
+      if (jaLido.has(m.getId())) return;
+      mensagens++;
+      try { novos += processar(m); jaLido.add(m.getId()); lidos.push(m.getId()); }
+      catch (e) { ok = false; console.error(m.getSubject(), e); } // se der erro, tenta de novo na próxima vez
     });
-    if (ok) conv.addLabel(rotulo); // se der erro, tenta de novo na próxima hora
+    if (ok) conv.addLabel(rotulo);
   });
-  console.log(`${conversas.length} conversas verificadas, ${novos} boletos novos enviados ao app.`);
+  props.setProperty('lidos', JSON.stringify(lidos.slice(-1500)));
+  console.log(`${conversas.length} conversas verificadas, ${mensagens} e-mails novos lidos, ${novos} boletos novos enviados ao app.`);
+  return { conversas: conversas.length, mensagens: mensagens, novos: novos };
 }
 
 function processar(m) {
@@ -172,11 +213,15 @@ function mod10(s) {
 }
 
 function enviar(dados) {
-  const resp = UrlFetchApp.fetch(CONFIG.SUPABASE_URL + '/rest/v1/rpc/receber_boleto_email', {
+  return chamarApp('receber_boleto_email', { p_token: CONFIG.TOKEN, p_dados: dados });
+}
+
+function chamarApp(funcao, args) {
+  const resp = UrlFetchApp.fetch(CONFIG.SUPABASE_URL + '/rest/v1/rpc/' + funcao, {
     method: 'post',
     contentType: 'application/json',
     headers: { apikey: CONFIG.SUPABASE_KEY, Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY },
-    payload: JSON.stringify({ p_token: CONFIG.TOKEN, p_dados: dados }),
+    payload: JSON.stringify(args),
     muteHttpExceptions: true,
   });
   if (resp.getResponseCode() >= 300) throw new Error('App respondeu ' + resp.getResponseCode() + ': ' + resp.getContentText());
@@ -185,7 +230,7 @@ function enviar(dados) {
 
 // Para testar a leitura sem enviar nada: execute "testar" e veja o registro.
 function testar() {
-  GmailApp.search(CONFIG.BUSCA.replace(/-label:\S+/, ''), 0, 5).forEach(c => c.getMessages().forEach(m => {
+  GmailApp.search(CONFIG.BUSCA, 0, 5).forEach(c => c.getMessages().forEach(m => {
     const pdfs = m.getAttachments({ includeInlineImages: false }).filter(a => /pdf/i.test(a.getContentType()));
     let txt = '';
     pdfs.forEach(a => { try { txt += textoDoPdf(a) + '\n'; } catch (e) { console.log('PDF não lido:', a.getName()); } });

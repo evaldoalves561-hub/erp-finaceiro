@@ -79,6 +79,10 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.click(`[data-acao=bol-lancar][data-id="${boletos[0].id}"]`);await pg.waitForTimeout(400);await shot(pg,'boletos-lancar');
     await pg.selectOption('#lConta',{index:8});await pg.click('form[data-form=lanc] button:not([type=button])');await pg.waitForTimeout(900);await shot(pg,'boletos-depois');
     if(boletos[0].status!=='lancado')errs.push('boleto não marcado como lançado');
+    DB.boletos_email_token[0].url_busca='https://script.google.com/macros/s/ABC_1/exec';let buscou=0;
+    await pg.route('https://script.google.com/**',r=>{buscou++;r.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify({ok:true,conversas:30,novos:1})})});
+    await pg.evaluate(()=>{location.hash='contas'});await pg.waitForTimeout(700);await pg.evaluate(()=>{location.hash='boletos'});await pg.waitForTimeout(900);await shot(pg,'boletos-botao');
+    await pg.click('[data-acao=bol-buscar]');await pg.waitForTimeout(900);await shot(pg,'boletos-buscou');if(!buscou)errs.push('botão buscar não chamou o script');
     await pg.evaluate(()=>location.hash='dre');await pg.waitForTimeout(500);await pg.click('[data-abre=dop]');await pg.click('[data-dre=unid]');await shot(pg,'dre-unid');await pg.click('[data-dre=comp]');await shot(pg,'dre-comp');
     await pg.click('#fTipo [data-per=mes]');await shot(pg,'dre-mes');
     await pg.click('[data-dre=mes]');await pg.waitForTimeout(400);
