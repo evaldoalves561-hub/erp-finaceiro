@@ -144,6 +144,9 @@ tr.grp-row td{background:var(--surface-2);font-weight:700}
 .sugg{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .sugg select{font-size:12.5px;padding:4px 6px;max-width:250px}
 .sugg .btn{padding:4px 10px;font-size:12.5px}
+.es-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--surface-2);margin-top:8px;gap:2px}.es-bar span{display:block;height:100%;border-radius:3px}
+.dica{margin-top:12px;font-size:13px;color:var(--ink-2)}.dica summary{cursor:pointer;color:var(--accent-ink);font-weight:600}.dica ol{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.ext-acao{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ext-acao+.ext-acao{margin-top:6px}tr.sel td{background:var(--accent-soft)}
 .why{font-size:11.5px;color:var(--ink-2);display:block;white-space:normal;max-width:300px}
 td.wrap{white-space:normal;min-width:220px}
 .audit-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:end}
@@ -980,6 +983,7 @@ async function executarImport(){
 }
 async function desfazerImport(id){
   if(!confirm('Apagar todos os lançamentos e parcelas desta importação?'))return;
+  try{const ids=(await todos(()=>sb.from('lancamentos').select('id').eq('importacao_id',id))).map(l=>l.id);await soltarExtrato(ids)}catch(e){toast(traduz(e));return}
   const {error}=await sb.from('lancamentos').delete().eq('importacao_id',id);
   if(error){toast(traduz(error));return}
   const {error:e2}=await sb.from('importacoes').delete().eq('id',id);if(e2){toast(traduz(e2));return}
@@ -1026,7 +1030,6 @@ function formUsuario(uid){
 
 // ===================== Telas da próxima fase
 const EM_BREVE={
-  auditoria:['Auditoria de extratos','Você envia o extrato (OFX ou CSV) e o sistema mostra o que bate com os lançamentos, o que tem valor diferente e o que não foi lançado, sugerindo a conta do plano.'],
   nfs:['Notas fiscais','Entrada de notas por e-mail automático, foto e XML. Nota de estoque gera a entrada no estoque e as parcelas de pagamento.'],
   estoque:['Estoque','Saldo por produto e prédio, custo médio, mínimo e movimentações vindas das notas.'],
 };
@@ -2042,15 +2045,293 @@ document.addEventListener('input',ev=>{const t=ev.target;if(t.id==='bNome'){cons
 document.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&['salBruto','salDep','salOutros'].includes(ev.target.id)){ev.preventDefault();lerSal();render(true)}});
 </script>
 <script>
+// ===================== Extratos bancários: importação (OFX, CSV, PDF) e conciliação
+const MESES_ABR={JAN:1,FEV:2,MAR:3,ABR:4,MAI:5,JUN:6,JUL:7,AGO:8,SET:9,OUT:10,NOV:11,DEZ:12};
+const dias=(a,b)=>Math.round((Date.parse(a)-Date.parse(b))/864e5);
+const somaDias=(iso,n)=>new Date(Date.parse(iso)+n*864e5).toISOString().slice(0,10);
+const numBR=s=>{s=String(s).replace(/[R$\s]/g,'');return +s.replace(/\./g,'').replace(',','.')};
+function isoDe(s){s=String(s||'').trim();let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];
+  m=s.match(/^(\d{2})\/(\d{2})\/(\d{2,4})/);if(m)return (m[3].length===2?'20'+m[3]:m[3])+'-'+m[2]+'-'+m[1];return null}
+// texto do histórico sem prefixos genéricos e sem números: vira a "chave" da regra de classificação
+const PREFIXOS=/^(TRANSFERENCIA (ENVIADA|RECEBIDA)( PELO PIX)?|TRANSF(ERENCIA)? (ENVIADA|RECEBIDA)|PIX (ENVIADO|RECEBIDO)|COMPRA NO DEBITO( VIA NUPAY)?|COMPRA NO DEBITO|PAGAMENTO DE BOLETO EFETUADO|PAGAMENTO DE FATURA|PAGAMENTO EFETUADO|DEBITO EM CONTA|ESTORNO( DE)?|RESGATE|APLICACAO|DEPOSITO RECEBIDO( POR BOLETO)?|PIX|TED|DOC)\b[\s\-:]*/;
+function chaveHist(h){let s=norm(h).replace(/[•*]/g,' ').replace(/[^A-Z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+  for(let i=0;i<3;i++)s=s.replace(PREFIXOS,'').trim();
+  return s.split(' ').filter(w=>w.length>1&&!/\d/.test(w)&&!['CPF','CNPJ','AGENCIA','CONTA','BCO','IP','SA','S A','LTDA','ME','EIRELI','DE','DA','DO','DOS','DAS'].includes(w)).slice(0,4).join(' ')}
+
+// ---------- leitores
+function lerOFX(t){
+  const tag=(b,n)=>{const m=b.match(new RegExp('<'+n+'>([^<\\r\\n]*)','i'));return m?m[1].trim():''};
+  const dt=v=>v?v.slice(0,4)+'-'+v.slice(4,6)+'-'+v.slice(6,8):null;
+  const linhas=[...t.matchAll(/<STMTTRN>([\s\S]*?)(?:<\/STMTTRN>|(?=<STMTTRN>)|(?=<\/BANKTRANLIST>))/gi)].map(m=>{const b=m[1];
+    const nome=tag(b,'NAME'),memo=tag(b,'MEMO');
+    return {data:dt(tag(b,'DTPOSTED')),valor:r2(+tag(b,'TRNAMT').replace(',','.')),documento:tag(b,'FITID')||tag(b,'CHECKNUM')||null,historico:[memo,nome&&!memo.includes(nome)?nome:''].filter(Boolean).join(' · ')||tag(b,'TRNTYPE')}}).filter(l=>l.data&&!isNaN(l.valor));
+  const bal=t.match(/<LEDGERBAL>[\s\S]*?<BALAMT>([^<\r\n]+)/i);
+  return {linhas,saldo:bal?r2(+bal[1].replace(',','.')):null,ini:dt(tag(t,'DTSTART')),fim:dt(tag(t,'DTEND')),formato:'OFX'};
+}
+function lerCSVExtrato(t){
+  const ls=t.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());if(!ls.length)return {linhas:[]};
+  const sep=(ls[0].match(/;/g)||[]).length>(ls[0].match(/,/g)||[]).length?';':',';
+  const split=l=>{const out=[];let cur='',q=false;for(const c of l){if(c==='"')q=!q;else if(c===sep&&!q){out.push(cur);cur=''}else cur+=c}out.push(cur);return out.map(x=>x.trim())};
+  const h=split(ls[0]).map(norm);const col=re=>h.findIndex(x=>re.test(x));
+  const cD=col(/^(DATA|DATE)/),cV=col(/^(VALOR|AMOUNT|QUANTIA)/),cH=col(/^(DESCRICAO|HISTORICO|TITLE|LANCAMENTO|DESCRIPTION)/),cI=col(/^(IDENTIFICADOR|ID|DOCUMENTO)$/);
+  if(cD<0||cV<0)throw new Error('O CSV precisa ter as colunas Data e Valor (o CSV do Nubank já vem assim).');
+  const cartao=h[cD]==='DATE'&&h[cV]==='AMOUNT'; // CSV da fatura do cartão Nubank: valor positivo = gasto
+  const linhas=ls.slice(1).map(split).map(c=>{const s=c[cV]||'';let v=/,\d{1,2}$/.test(s)?numBR(s):+s.replace(/[R$\s]/g,'');if(cartao)v=-v;
+    return {data:isoDe(c[cD]),valor:r2(v),historico:cH>=0?c[cH]:'',documento:cI>=0?c[cI]||null:null}}).filter(l=>l.data&&!isNaN(l.valor)&&l.valor);
+  return {linhas,formato:cartao?'CSV (fatura do cartão)':'CSV'};
+}
+let pdfPronto=null;
+function carregarPdfJs(){if(window.pdfjsLib)return Promise.resolve();if(pdfPronto)return pdfPronto;
+  pdfPronto=new Promise((ok,erro)=>{const s=document.createElement('script');s.src='vendor/pdf.min.js';s.onload=()=>{pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';ok()};s.onerror=()=>{pdfPronto=null;erro(new Error('O leitor de PDF não carregou. Verifique a internet e tente de novo.'))};document.head.appendChild(s)});return pdfPronto}
+async function textoPDF(buf){
+  await carregarPdfJs();const doc=await pdfjsLib.getDocument({data:buf}).promise;const pags=[];
+  for(let p=1;p<=doc.numPages;p++){const tc=await (await doc.getPage(p)).getTextContent();const rows=[];
+    tc.items.forEach(it=>{const s=it.str;if(!s||!s.trim())return;const y=it.transform[5],x=it.transform[4];let r=rows.find(r=>Math.abs(r.y-y)<3);if(!r){r={y,its:[]};rows.push(r)}r.its.push({x,s})});
+    rows.sort((a,b)=>b.y-a.y);pags.push(rows.map(r=>r.its.sort((a,b)=>a.x-b.x).map(i=>i.s.trim()).join(' ').replace(/\s+/g,' ').trim()))}
+  return pags;
+}
+const RE_VAL=/([+-]|-\s)?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([CD])?$/;
+const RE_IGNORA=/^(SALDO|RENDIMENTO LIQUIDO|MOVIMENTACOES|TEM ALGUMA DUVIDA|EXTRATO GERADO|O SALDO|OUVIDORIA|CASO |VALORES EM|NU PAGAMENTOS|NU FINANCEIRA|ASSINADO|PAGINA|CPF |CNPJ |AGENCIA |CONTA |PERIODO|\d+ DE \d+$|\d+\/\d+$)/;
+function lerTextoExtrato(pags){
+  // 1) layout do Nubank: "01 OUT 2026 Total de entradas + 1.000,00" e as movimentações do dia abaixo, sem sinal
+  let linhas=[],data=null,sinal=0,ult=null,cont=0,saldo=null;
+  pags.forEach(pg=>{ult=null;pg.forEach(raw=>{let l=raw;const n=norm(l);
+    const sf=n.match(/^SALDO FINAL DO PERIODO\s*(-)?\s*(?:R\$\s*)?([\d.]+,\d{2})/);if(sf)saldo=(sf[1]?-1:1)*numBR(sf[2]);
+    const md=n.match(/^(\d{2}) (JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ) (\d{4})\b\s*/);
+    if(md){data=`${md[3]}-${String(MESES_ABR[md[2]]).padStart(2,'0')}-${md[1]}`;l=l.slice(md[0].length).trim();ult=null;sinal=0;if(!l)return}
+    const nl=norm(l);
+    if(/^TOTAL DE ENTRADAS/.test(nl)){sinal=1;ult=null;return}
+    if(/^TOTAL DE SAIDAS/.test(nl)){sinal=-1;ult=null;return}
+    if(RE_IGNORA.test(nl)){ult=null;return}
+    const mv=l.match(RE_VAL);
+    if(mv&&data&&sinal){const hist=l.slice(0,mv.index).trim();if(!hist)return;ult={data,valor:r2(sinal*numBR(mv[2])),historico:hist,documento:null};linhas.push(ult);cont=0;return}
+    if(ult&&!mv&&cont<2&&l.length<160){ult.historico+=' '+l;cont++}
+  })});
+  const MESX={JANEIRO:1,FEVEREIRO:2,MARCO:3,ABRIL:4,MAIO:5,JUNHO:6,JULHO:7,AGOSTO:8,SETEMBRO:9,OUTUBRO:10,NOVEMBRO:11,DEZEMBRO:12};let ini=null,fim=null;
+  for(const l of pags.flat()){const m=norm(l).match(/(\d{1,2}) DE ([A-Z]+) DE (\d{4}) A (\d{1,2}) DE ([A-Z]+) DE (\d{4})/);if(m&&MESX[m[2]]&&MESX[m[5]]){const f=(d,me,a)=>`${a}-${String(MESX[me]).padStart(2,'0')}-${d.padStart(2,'0')}`;ini=f(m[1],m[2],m[3]);fim=f(m[4],m[5],m[6]);break}}
+  if(linhas.length)return {linhas,saldo,ini,fim,formato:'PDF Nubank'};
+  // 2) layout comum de banco: "05/10/2026 HISTÓRICO ... -150,00 [saldo]"
+  pags.flat().forEach(l=>{const m=l.match(/^(\d{2}\/\d{2}\/\d{2,4})\s+(.+)$/);if(!m)return;
+    const vals=[...m[2].matchAll(/(-\s?)?(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([CD](?![A-Z]))?/g)];if(!vals.length)return;
+    const v=vals[0];const hist=m[2].slice(0,v.index).trim();if(!hist||/^SALDO/i.test(norm(hist)))return;
+    linhas.push({data:isoDe(m[1]),valor:r2((v[1]||v[3]==='D'?-1:1)*numBR(v[2])),historico:hist,documento:null})});
+  return {linhas,saldo,formato:'PDF'};
+}
+async function lerArquivoExtrato(f){
+  const nome=f.name.toLowerCase();
+  if(nome.endsWith('.ofx')||nome.endsWith('.qfx'))return lerOFX(await f.text());
+  if(nome.endsWith('.csv'))return lerCSVExtrato(await f.text());
+  if(nome.endsWith('.pdf')){const pags=await textoPDF(new Uint8Array(await f.arrayBuffer()));
+    if(!pags.flat().length)throw new Error('Este PDF não tem texto (parece uma imagem ou foto). Baixe o extrato direto no app do banco, em PDF, OFX ou CSV.');
+    const r=lerTextoExtrato(pags);if(!r.linhas.length)throw new Error('Não encontrei movimentações neste PDF. Envie o extrato em OFX ou CSV, ou mande este PDF para ajustarmos a leitura.');return r}
+  throw new Error('Formato não aceito. Envie .ofx, .csv ou .pdf.');
+}
+
+// ---------- conciliação
+const stExt=()=>S.ext||(S.ext={emp:null,banco:null,prev:null,aberto:null,sel:new Set(),contas:{}});
+function sugerirConta(hist,empId,regras){
+  const n=norm(hist),ch=chaveHist(hist);
+  const r=regras.filter(r=>(!r.empresa_id||r.empresa_id===empId)&&r.padrao&&(n.includes(r.padrao)||ch&&ch===r.padrao)).sort((a,b)=>b.padrao.length-a.padrao.length||b.vezes_usada-a.vezes_usada)[0];
+  if(r&&conta(r.conta_id))return {conta_id:r.conta_id,confianca:'alta',motivo:'regra aprendida: '+r.padrao};
+  const cts=S.contas.filter(c=>c.empresa_id===empId&&c.analitica&&c.ativa!==false);
+  const acha=re=>cts.find(c=>re.test(norm(c.nome)));
+  const KW=[[/TARIFA|PACOTE DE SERVICOS|MENSALIDADE CONTA/,/TARIFA/],[/\bIOF\b/,/IOF|TARIFA/],[/RENDIMENTO|REMUNERACAO/,/RENDIMENTO|RECEITA FINANCEIRA|APLICAC/],[/JUROS/,/JUROS/],
+    [/SALARIO|FOLHA|PAGTO SAL/,/SALARIO/],[/ALUGUEL/,/ALUGUEL/],[/ENERGIA|ENEL|CEMIG|COPEL|CPFL|LIGHT|EQUATORIAL|NEOENERGIA/,/ENERGIA|LUZ/],[/SABESP|COPASA|SANEAGO|AGUA/,/AGUA/],
+    [/INTERNET|VIVO|CLARO|TIM |OI /,/INTERNET|TELEFON/],[/POSTO|COMBUST|SHELL|IPIRANGA|PETROBRAS/,/COMBUST/],[/MERCADO|SUPERMERC|ATACAD|ASSAI|CARREFOUR/,/\bMERCADO\b|SUPERMERCADO|ALIMENTA/],
+    [/FARMACIA|DROGA|RAIA|PAGUE MENOS/,/FARMACIA|SAUDE|MEDIC/],[/IFOOD|RESTAUR|LANCHONETE|PADARIA/,/ALIMENTA|REFEI/],[/UBER|99 ?APP|99POP/,/TRANSPORTE/],[/DAS |SIMPLES NACIONAL|DARF|RECEITA FEDERAL/,/IMPOSTO|DAS|TRIBUT/]];
+  for(const [re,rc] of KW)if(re.test(n)){const c=acha(rc);if(c)return {conta_id:c.id,confianca:'media',motivo:'pela palavra no histórico'}}
+  return null;
+}
+async function dadosConciliacao(empId,bancoId,ini,fim){
+  const [pagas,abertas,regras,exts]=await Promise.all([
+    todos(()=>sb.from('parcelas').select('id,valor,valor_pago,data_pagamento,vencimento,conta_bancaria_id,lancamento_id,lancamentos(descricao,conta_id,parceiro_id)').eq('empresa_id',empId).eq('status','paga').gte('data_pagamento',somaDias(ini,-5)).lte('data_pagamento',somaDias(fim,5))),
+    todos(()=>sb.from('parcelas').select('id,valor,vencimento,conta_bancaria_id,lancamento_id,lancamentos(descricao,conta_id,parceiro_id)').eq('empresa_id',empId).eq('status','aberta').gte('vencimento',somaDias(ini,-20)).lte('vencimento',somaDias(fim,20))),
+    sb.from('regras_classificacao').select('*').then(r=>r.data||[]),
+    sb.from('extratos').select('id').eq('conta_bancaria_id',bancoId).then(r=>(r.data||[]).map(x=>x.id))]);
+  let usadas=[];for(let i=0;i<exts.length;i+=100){const {data,error}=await sb.from('extrato_linhas').select('id,extrato_id,data,valor,documento,historico,parcela_id').in('extrato_id',exts.slice(i,i+100));if(error)throw error;usadas=usadas.concat(data)}
+  return {pagas:pagas.filter(p=>!p.conta_bancaria_id||p.conta_bancaria_id===bancoId),abertas:abertas.filter(p=>!p.conta_bancaria_id||p.conta_bancaria_id===bancoId),regras,ja:usadas};
+}
+// procura a baixa do sistema (parcela paga) ou a conta em aberto que corresponde a cada linha do extrato
+function casar(linhas,D,ignorarExtrato){
+  const usadas=new Set(D.ja.filter(x=>x.parcela_id&&x.extrato_id!==ignorarExtrato).map(x=>x.parcela_id));
+  const ord=[...linhas].sort((a,b)=>a.data.localeCompare(b.data));const res=new Map();
+  ord.forEach(l=>{if(l.parcela_id){usadas.add(l.parcela_id);return}});
+  ord.forEach(l=>{if(l.parcela_id||l.status==='ignorado'||l.status==='lancado_na_auditoria')return;
+    const pv=p=>+(p.valor_pago??p.valor);
+    let p=D.pagas.filter(p=>!usadas.has(p.id)&&Math.abs(pv(p)-l.valor)<0.005&&Math.abs(dias(p.data_pagamento,l.data))<=3).sort((a,b)=>Math.abs(dias(a.data_pagamento,l.data))-Math.abs(dias(b.data_pagamento,l.data)))[0];
+    if(p){usadas.add(p.id);res.set(l,{tipo:'conciliado',p});return}
+    p=D.pagas.filter(p=>!usadas.has(p.id)&&Math.sign(pv(p))===Math.sign(l.valor)&&dias(p.data_pagamento,l.data)===0&&Math.abs(pv(p)-l.valor)<=Math.max(1,Math.abs(l.valor)*0.05)&&(!p.lancamentos?.descricao||chaveHist(p.lancamentos.descricao)&&norm(l.historico).includes(chaveHist(p.lancamentos.descricao).split(' ')[0])))[0];
+    if(p){usadas.add(p.id);res.set(l,{tipo:'valor_diferente',p,dif:r2(l.valor-pv(p))});return}
+    p=D.abertas.filter(p=>!usadas.has(p.id)&&Math.abs(+p.valor-l.valor)<0.005&&Math.abs(dias(p.vencimento,l.data))<=15).sort((a,b)=>Math.abs(dias(a.vencimento,l.data))-Math.abs(dias(b.vencimento,l.data)))[0];
+    if(p){usadas.add(p.id);res.set(l,{tipo:'aberta',p})}});
+  return res;
+}
+const chaveLinha=l=>l.documento?'d|'+l.documento:`h|${l.data}|${r2(l.valor).toFixed(2)}|${chaveHist(l.historico)}`;
+
+async function lerExtratoEnviado(f){
+  const E=stExt();if(!E.banco){toast('Escolha a conta bancária antes de enviar o extrato.');return}
+  E.lendo=f.name;render(true);
+  try{const r=await lerArquivoExtrato(f);
+    if(!r.linhas.length)throw new Error('O arquivo não tem movimentações.');
+    const datas=r.linhas.map(l=>l.data).sort();const ini=r.ini&&r.ini<=datas[0]?r.ini:datas[0],fim=r.fim&&r.fim>=datas.at(-1)?r.fim:datas.at(-1);
+    const D=await dadosConciliacao(E.emp,E.banco,ini,fim);
+    const ja=new Set(D.ja.map(chaveLinha));
+    const lin=r.linhas.map(l=>({...l,dup:ja.has(chaveLinha(l))}));
+    const novas=lin.filter(l=>!l.dup);const cas=casar(novas,D);
+    novas.forEach(l=>{const c=cas.get(l);l.match=c||null;if(!c||c.tipo==='aberta'){const s=sugerirConta(l.historico,E.emp,D.regras);l.sug=s}});
+    E.prev={nome:f.name,formato:r.formato,saldo:r.saldo,ini,fim,lin};E.aberto=null;
+  }catch(err){console.error(err);toast(err.message||traduz(err))}
+  finally{E.lendo=null;render(true)}
+}
+async function gravarExtrato(){
+  const E=stExt(),P=E.prev;if(!P)return;const novas=P.lin.filter(l=>!l.dup);if(!novas.length){toast('Todas as linhas deste arquivo já foram importadas antes.');return}
+  const id=uuid();
+  const {error}=await sb.from('extratos').insert({id,empresa_id:E.emp,conta_bancaria_id:E.banco,arquivo_nome:P.nome,periodo_inicio:P.ini,periodo_fim:P.fim,saldo_final:P.saldo});if(error)throw error;
+  const rows=novas.map(l=>{const m=l.match;const ok=m&&m.tipo!=='aberta';
+    return {empresa_id:E.emp,extrato_id:id,data:l.data,historico:l.historico.slice(0,500),documento:l.documento,valor:l.valor,
+      status:ok?m.tipo:'nao_lancado',parcela_id:ok?m.p.id:null,diferenca:m?.tipo==='valor_diferente'?m.dif:null,
+      conta_sugerida_id:l.sug?.conta_id||null,confianca:l.sug?.confianca||null,motivo_sugestao:l.sug?.motivo||null}});
+  for(let i=0;i<rows.length;i+=500){const {error:e2}=await sb.from('extrato_linhas').insert(rows.slice(i,i+500));if(e2){await sb.from('extratos').delete().eq('id',id);throw e2}}
+  E.prev=null;E.aberto=id;E.sel=new Set();E.contas={};toast(`Extrato gravado: ${rows.length} linha${rows.length>1?'s':''}.`);render();
+}
+async function abrirExtratoSalvo(id){
+  const {data:x,error}=await sb.from('extratos').select('*').eq('id',id).single();if(error)throw error;
+  const {data:ls,error:e2}=await sb.from('extrato_linhas').select('*').eq('extrato_id',id).order('data');if(e2)throw e2;
+  const D=await dadosConciliacao(x.empresa_id,x.conta_bancaria_id,x.periodo_inicio||ls[0]?.data||HOJE,x.periodo_fim||ls.at(-1)?.data||HOJE);
+  const pend=ls.filter(l=>l.status==='nao_lancado');const cas=casar(pend,D,id);
+  const todasParc=new Map([...D.pagas,...D.abertas].map(p=>[p.id,p]));
+  pend.forEach(l=>{const c=cas.get(l);if(c)l.match=c;if(!l.conta_sugerida_id){const s=sugerirConta(l.historico,x.empresa_id,D.regras);if(s){l.conta_sugerida_id=s.conta_id;l.confianca=s.confianca;l.motivo_sugestao=s.motivo}}});
+  ls.forEach(l=>{if(l.parcela_id)l.parc=todasParc.get(l.parcela_id)||null});
+  return {x,ls,regras:D.regras};
+}
+
+// ---------- tela
+const ST_EXT={conciliado:['Conciliado','good'],valor_diferente:['Valor diferente','warn'],nao_lancado:['Não lançado','bad'],lancado_na_auditoria:['Lançado agora','info'],ignorado:['Ignorado','mute']};
+function selectConta(empId,sel,attrs){const cts=S.contas.filter(c=>c.empresa_id===empId&&c.analitica&&c.ativa!==false).sort((a,b)=>a.codigo.localeCompare(b.codigo,'pt',{numeric:true}));
+  return `<select ${attrs} style="min-width:200px;max-width:280px"><option value="">Escolha a conta…</option>${['receita','despesa'].map(t=>`<optgroup label="${t==='receita'?'Receitas':'Despesas'}">${cts.filter(c=>c.tipo===t).map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.codigo)} ${esc(c.nome)}</option>`).join('')}</optgroup>`).join('')}</select>`}
+function barraES(ent,sai){const t=Math.max(1,ent+Math.abs(sai));return `<div class="es-bar" aria-hidden="true"><span style="width:${ent/t*100}%;background:var(--good)"></span><span style="width:${Math.abs(sai)/t*100}%;background:var(--bad)"></span></div>`}
+async function vExtratos(){
+  const E=stExt();
+  const emps=S.empresas.filter(e=>S.bancos.some(b=>b.empresa_id===e.id));
+  if(!emps.length)return vazio('Cadastre uma conta bancária primeiro','<p style="margin:0">O extrato é importado para uma conta bancária da empresa (por exemplo, Nubank). Cadastre a conta e volte aqui.</p>','<a class="btn" href="#bancos">Ir para contas bancárias</a>');
+  if(!E.emp||!emps.some(e=>e.id===E.emp))E.emp=(selEmp().find(e=>emps.includes(e))||emps[0]).id;
+  const bs=S.bancos.filter(b=>b.empresa_id===E.emp&&b.ativa!==false);
+  if(!bs.some(b=>b.id===E.banco))E.banco=(bs.find(b=>/NUBANK|NU PAGAMENTOS/.test(norm(b.banco_nome))||b.banco_codigo==='260')||bs[0])?.id||null;
+  const ed=podeEditar(E.emp);
+  const {data:hist}=await sb.from('extratos').select('*').eq('empresa_id',E.emp).order('enviado_em',{ascending:false}).limit(30);
+  let resumo={};if(hist?.length){const {data:ls}=await sb.from('extrato_linhas').select('extrato_id,status,valor').in('extrato_id',hist.map(h=>h.id));(ls||[]).forEach(l=>{const r=resumo[l.extrato_id]||(resumo[l.extrato_id]={n:0,pend:0,ok:0});r.n++;if(l.status==='nao_lancado'||l.status==='valor_diferente')r.pend++;else r.ok++})}
+  const topo=`<div class="panel"><div class="audit-head"><div><h2>Importar extrato bancário</h2><p class="hint" style="margin-bottom:8px">Envie o extrato do banco. O sistema confere cada movimentação com as baixas já registradas, mostra o que falta lançar e sugere a conta do plano.</p>
+      <div class="ctrls" style="justify-content:flex-start"><select id="extEmp" aria-label="Empresa">${emps.map(e=>`<option value="${e.id}" ${e.id===E.emp?'selected':''}>${esc(nomeEmp(e))}</option>`).join('')}</select>
+      <select id="extBanco" aria-label="Conta bancária">${bs.map(b=>`<option value="${b.id}" ${b.id===E.banco?'selected':''}>${esc(b.banco_nome)} · ag ${esc(b.agencia)} · cc ${esc(b.conta)}</option>`).join('')}</select></div></div>
+    ${ed?`<label class="drop" for="arqExt" style="padding:12px 14px"><div><b>${E.lendo?'Lendo '+esc(E.lendo)+'…':'Enviar extrato'}</b><p>.ofx, .csv ou .pdf</p></div><span class="btn">Escolher arquivo</span><input type="file" id="arqExt" accept=".ofx,.qfx,.csv,.pdf" hidden></label>`:''}</div>
+    <details class="dica"><summary>Como tirar o extrato do Nubank</summary><ol><li>No app do Nubank, abra a conta e toque em <b>Extrato</b> (ou no ícone de exportar, no canto de cima).</li><li>Escolha o período e o formato. <b>OFX</b> é o mais confiável; CSV e PDF também funcionam.</li><li>O arquivo chega por e-mail. Salve no computador ou celular e envie aqui.</li></ol><p class="muted" style="margin:6px 0 0">Movimentações que já estão em outro extrato da mesma conta são reconhecidas e não entram duas vezes.</p></details></div>`;
+  let corpo='';
+  if(E.prev)corpo=telaPrevia(E);
+  else if(E.aberto){try{const A=await abrirExtratoSalvo(E.aberto);corpo=telaConciliacao(A,ed)}catch(err){E.aberto=null;corpo=vazio('Não consegui abrir o extrato',`<p style="margin:0">${esc(traduz(err))}</p>`)}}
+  const histHtml=`<div class="panel"><h2>Extratos importados · ${esc(nomeEmp(empresa(E.emp)))}</h2><p class="hint">Abra um extrato para lançar o que falta. Excluir apaga só o extrato; os lançamentos feitos a partir dele continuam.</p>
+    ${hist?.length?`<div class="tbl-wrap"><table><thead><tr><th>Enviado</th><th>Conta</th><th>Arquivo</th><th>Período</th><th class="n">Linhas</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${hist.map(h=>{const r=resumo[h.id]||{n:0,pend:0};return `<tr class="${E.aberto===h.id?'sel':''}"><td class="mono">${h.enviado_em?dataBR(String(h.enviado_em).slice(0,10)):''}</td><td>${esc(banco(h.conta_bancaria_id)?.banco_nome||'')}</td><td class="wrap">${esc(h.arquivo_nome||'')}</td><td class="mono">${dataBR(h.periodo_inicio)} a ${dataBR(h.periodo_fim)}</td><td class="n">${r.n}</td>
+      <td>${r.pend?`<span class="chip warn">${r.pend} pendente${r.pend>1?'s':''}</span>`:'<span class="chip good">Conciliado</span>'}</td>
+      <td style="white-space:nowrap"><button class="btn ghost" data-acao="ext-abrir" data-id="${h.id}">Abrir</button>${ed?` <button class="linkbtn small" data-acao="ext-excluir" data-id="${h.id}" style="color:var(--bad)">Excluir</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted" style="margin:0">Nenhum extrato importado nesta empresa ainda.</p>'}</div>`;
+  return topo+corpo+histHtml;
+}
+const qMov=n=>n+(n===1?' movimentação':' movimentações');
+function tilesExt(lin,extra){const ent=sum(lin.filter(l=>l.valor>0).map(l=>l.valor)),sai=sum(lin.filter(l=>l.valor<0).map(l=>l.valor));
+  return `<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+    <div class="tile"><div class="lbl">Entradas no extrato</div><div class="val">${brl2.format(ent)}</div><div class="cmp">${qMov(lin.filter(l=>l.valor>0).length)}${barraES(ent,sai)}</div></div>
+    <div class="tile"><div class="lbl">Saídas no extrato</div><div class="val">${brl2.format(-sai)}</div><div class="cmp">${qMov(lin.filter(l=>l.valor<0).length)} · líquido ${brl2.format(ent+sai)}</div></div>
+    ${extra}</section>`}
+function telaPrevia(E){const P=E.prev;const novas=P.lin.filter(l=>!l.dup),dup=P.lin.length-novas.length;
+  const conc=novas.filter(l=>l.match&&l.match.tipo!=='aberta').length,aber=novas.filter(l=>l.match?.tipo==='aberta').length,falta=novas.length-conc;
+  const b=banco(E.banco);
+  return tilesExt(novas,`<div class="tile"><div class="lbl">Já no sistema</div><div class="val">${conc} de ${novas.length}</div><div class="cmp">${conc?'<span class="chip good">baixas encontradas</span>':'nenhuma baixa encontrada'}${dup?` · ${dup} repetida${dup>1?'s':''} ignorada${dup>1?'s':''}`:''}</div></div>
+    <div class="tile"><div class="lbl">Para lançar</div><div class="val">${falta}</div><div class="cmp">${aber?`<span class="chip info">${aber} batem com contas em aberto</span>`:`${novas.filter(l=>l.sug).length} com conta sugerida`}</div></div>`)+
+  `<div class="panel"><div class="ph"><div><h2>Prévia · ${esc(P.nome)}</h2><p class="hint">${esc(P.formato)} · ${dataBR(P.ini)} a ${dataBR(P.fim)} · ${esc(b?.banco_nome||'')} ag ${esc(b?.agencia||'')} cc ${esc(b?.conta||'')}${P.saldo!=null?' · saldo final '+brl2.format(P.saldo):''}. Confira se a conta está certa antes de gravar.</p></div>
+    <div class="ctrls"><button class="btn ghost" data-acao="ext-cancelar">Cancelar</button><button class="btn" data-acao="ext-gravar" ${novas.length?'':'disabled'}>Gravar ${novas.length} linha${novas.length===1?'':'s'} e conciliar</button></div></div>
+   <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Histórico do banco</th><th class="n">Valor</th><th>Situação</th><th>No sistema / sugestão</th></tr></thead><tbody>
+   ${P.lin.slice(0,800).map(l=>{const m=l.match;const st=l.dup?'<span class="chip mute">Já importada</span>':m?.tipo==='conciliado'?'<span class="chip good">Conciliado</span>':m?.tipo==='valor_diferente'?'<span class="chip warn">Valor diferente</span>':m?.tipo==='aberta'?'<span class="chip info">Conta em aberto</span>':'<span class="chip bad">Não lançado</span>';
+     const ct=l.sug&&conta(l.sug.conta_id);const info=m?`${esc(m.p.lancamentos?.descricao||'Lançamento')}<span class="unit">${m.tipo==='aberta'?'vence '+dataBR(m.p.vencimento):'pago '+dataBR(m.p.data_pagamento)}${m.tipo==='valor_diferente'?' · diferença '+brl2.format(m.dif):''}</span>`:ct?`${esc(ct.codigo)} ${esc(ct.nome)}<span class="unit">${l.sug.confianca==='alta'?'regra aprendida':'sugestão pelo histórico'}</span>`:'<span class="muted">escolher depois de gravar</span>';
+     return `<tr class="${l.dup?'muted':''}"><td class="mono">${dataBR(l.data)}</td><td class="wrap">${esc(l.historico)}</td><td class="n ${l.valor<0?'neg':''}">${brl2.format(l.valor)}</td><td>${st}</td><td class="wrap">${info}</td></tr>`}).join('')}
+   </tbody></table></div>${P.lin.length>800?`<p class="muted">Mostrando 800 de ${P.lin.length} linhas; todas serão gravadas.</p>`:''}</div>`}
+function telaConciliacao(A,ed){const E=stExt();const {x,ls}=A;E._ls=ls;
+  const cont=s=>ls.filter(l=>l.status===s).length;const pend=ls.filter(l=>l.status==='nao_lancado');
+  const pct=ls.length?Math.round((ls.length-pend.length-cont('valor_diferente'))/ls.length*100):100;
+  const b=banco(x.conta_bancaria_id);
+  const linha=l=>{const [t,c]=ST_EXT[l.status]||['?','mute'];const m=l.match;const pe=l.status==='nao_lancado';
+    let acao='';
+    if(pe&&ed){acao=m?.tipo==='aberta'?`<div class="ext-acao"><span class="why">Bate com <b>${esc(m.p.lancamentos?.descricao||'conta em aberto')}</b>, vencimento ${dataBR(m.p.vencimento)}</span><button class="btn ghost" data-acao="ext-baixar" data-id="${l.id}" data-parc="${m.p.id}">Dar baixa</button></div>`:
+      m?.tipo==='conciliado'||m?.tipo==='valor_diferente'?`<div class="ext-acao"><span class="why">Encontrei a baixa <b>${esc(m.p.lancamentos?.descricao||'')}</b> de ${dataBR(m.p.data_pagamento)}</span><button class="btn ghost" data-acao="ext-vincular" data-id="${l.id}" data-parc="${m.p.id}">Vincular</button></div>`:'';
+      acao+=`<div class="ext-acao">${selectConta(x.empresa_id,E.contas[l.id]??l.conta_sugerida_id,`data-extconta="${l.id}" aria-label="Conta do plano"`)}${l.conta_sugerida_id&&!(l.id in E.contas)?`<span class="chip ${l.confianca==='alta'?'good':'info'}" title="${esc(l.motivo_sugestao||'')}">${l.confianca==='alta'?'regra':'sugerida'}</span>`:''}</div>`}
+    else if(l.parc||l.parcela_id)acao=`<span class="muted">${esc(l.parc?.lancamentos?.descricao||'Baixa vinculada')}${l.parc?.data_pagamento?' · pago '+dataBR(l.parc.data_pagamento):''}${l.diferenca?` · diferença ${brl2.format(+l.diferenca)}`:''}</span>`;
+    return `<tr><td>${pe&&ed?`<input type="checkbox" data-extsel="${l.id}" ${E.sel.has(l.id)?'checked':''} aria-label="Selecionar">`:''}</td><td class="mono">${dataBR(l.data)}</td><td class="wrap">${esc(l.historico)}</td><td class="n ${+l.valor<0?'neg':''}">${brl2.format(+l.valor)}</td>
+      <td><span class="chip ${c}">${t}</span></td><td class="wrap">${acao}</td><td>${ed&&(pe||l.status==='ignorado')?`<button class="linkbtn small" data-acao="${pe?'ext-ignorar':'ext-reabrir'}" data-id="${l.id}">${pe?'Ignorar':'Reabrir'}</button>`:''}</td></tr>`};
+  const ordem={nao_lancado:0,valor_diferente:1,lancado_na_auditoria:2,conciliado:3,ignorado:4};
+  const vis=[...ls].sort((a,b)=>(ordem[a.status]-ordem[b.status])||a.data.localeCompare(b.data));
+  return tilesExt(ls,`<div class="tile"><div class="lbl">Conciliado</div><div class="val">${pct}%</div><div class="cmp">${cont('conciliado')+cont('lancado_na_auditoria')} de ${ls.length} linhas${cont('ignorado')?` · ${cont('ignorado')} ignorada${cont('ignorado')>1?'s':''}`:''}<div class="es-bar"><span style="width:${pct}%;background:var(--accent)"></span></div></div></div>
+    <div class="tile"><div class="lbl">Falta lançar</div><div class="val">${pend.length}</div><div class="cmp">${pend.length?`<span class="chip bad">${brl2.format(sum(pend.map(l=>+l.valor)))}</span>`:'<span class="chip good">tudo certo</span>'}${cont('valor_diferente')?` · ${cont('valor_diferente')} com valor diferente`:''}</div></div>`)+
+  `<div class="panel"><div class="ph"><div><h2>Conciliação · ${esc(x.arquivo_nome||'extrato')}</h2><p class="hint">${esc(b?.banco_nome||'')} ag ${esc(b?.agencia||'')} cc ${esc(b?.conta||'')} · ${dataBR(x.periodo_inicio)} a ${dataBR(x.periodo_fim)}${x.saldo_final!=null?' · saldo final '+brl2.format(+x.saldo_final):''}. Escolha a conta do plano nas linhas não lançadas, marque e clique em lançar. O sistema aprende: na próxima vez, o mesmo histórico já vem com a conta.</p></div>
+    <div class="ctrls">${ed&&pend.length?`<button class="linkbtn" data-acao="ext-sel-todas">Marcar as que têm conta</button><button class="btn" data-acao="ext-lancar">Lançar ${E.sel.size||''} selecionada${E.sel.size===1?'':'s'}</button>`:''}<button class="btn ghost" data-acao="ext-fechar">Fechar</button></div></div>
+   <div class="tbl-wrap"><table><thead><tr><th></th><th>Data</th><th>Histórico do banco</th><th class="n">Valor</th><th>Situação</th><th>Conta do plano / baixa</th><th></th></tr></thead><tbody>${vis.map(linha).join('')}</tbody></table></div></div>`}
+
+// ---------- ações
+async function lancarLinhas(){
+  const E=stExt();const ls=(E._ls||[]).filter(l=>E.sel.has(l.id)&&l.status==='nao_lancado');
+  if(!ls.length){toast('Marque as linhas que quer lançar.');return}
+  const semConta=ls.filter(l=>!(E.contas[l.id]??l.conta_sugerida_id));if(semConta.length){toast(`Escolha a conta do plano em ${semConta.length} linha${semConta.length>1?'s':''} marcada${semConta.length>1?'s':''}.`);return}
+  const x=(await sb.from('extratos').select('empresa_id,conta_bancaria_id').eq('id',E.aberto).single()).data;
+  const L=[],P=[],up=[];
+  ls.forEach(l=>{const cid=E.contas[l.id]??l.conta_sugerida_id;const id=uuid(),pid=uuid();const v=r2(+l.valor);
+    L.push({id,empresa_id:x.empresa_id,conta_id:cid,competencia:l.data,descricao:l.historico.slice(0,300),valor:v,origem:'manual'});
+    P.push({id:pid,empresa_id:x.empresa_id,lancamento_id:id,numero:1,vencimento:l.data,valor:v,data_pagamento:l.data,valor_pago:v,status:'paga',forma_pagamento:'Extrato bancário',conta_bancaria_id:x.conta_bancaria_id});
+    up.push([l,pid,cid])});
+  for(let i=0;i<L.length;i+=300){const {error}=await sb.from('lancamentos').insert(L.slice(i,i+300));if(error)throw error;const {error:e2}=await sb.from('parcelas').insert(P.slice(i,i+300));if(e2)throw e2}
+  for(let i=0;i<up.length;i+=20)await Promise.all(up.slice(i,i+20).map(([l,pid,cid])=>sb.from('extrato_linhas').update({status:'lancado_na_auditoria',parcela_id:pid,conta_sugerida_id:cid}).eq('id',l.id).then(r=>{if(r.error)throw r.error})));
+  // aprende: histórico -> conta
+  const {data:regras}=await sb.from('regras_classificacao').select('id,padrao,conta_id,vezes_usada,empresa_id').eq('empresa_id',x.empresa_id);const novas=new Map();
+  for(const [l,,cid] of up){const ch=chaveHist(l.historico);if(!ch||ch.length<3)continue;const r=(regras||[]).find(r=>r.padrao===ch);
+    if(r){await sb.from('regras_classificacao').update({conta_id:cid,vezes_usada:(r.vezes_usada||0)+1}).eq('id',r.id);r.conta_id=cid;r.vezes_usada++}
+    else novas.set(ch,{empresa_id:x.empresa_id,padrao:ch,conta_id:cid,vezes_usada:1})}
+  if(novas.size)await sb.from('regras_classificacao').insert([...novas.values()]);
+  E.sel=new Set();E.contas={};invalidar();toast(`${ls.length} lançamento${ls.length>1?'s':''} criado${ls.length>1?'s':''} e conciliado${ls.length>1?'s':''}.`);render(true);
+}
+// antes de apagar lançamentos: solta as linhas de extrato que apontam para as parcelas deles
+async function soltarExtrato(lancIds){
+  for(let i=0;i<lancIds.length;i+=100){const {data:ps}=await sb.from('parcelas').select('id').in('lancamento_id',lancIds.slice(i,i+100));const ids=(ps||[]).map(p=>p.id);
+    for(let j=0;j<ids.length;j+=100)await sb.from('extrato_linhas').update({parcela_id:null,status:'nao_lancado',diferenca:null}).in('parcela_id',ids.slice(j,j+100))}}
+const ACOES_EXT={
+  'ext-gravar':async b=>{b.disabled=true;await gravarExtrato()},
+  'ext-cancelar':()=>{stExt().prev=null;render(true)},
+  'ext-abrir':b=>{const E=stExt();E.aberto=b.dataset.id;E.prev=null;E.sel=new Set();E.contas={};render(true)},
+  'ext-fechar':()=>{const E=stExt();E.aberto=null;E.sel=new Set();render(true)},
+  'ext-excluir':async b=>{if(!confirm('Excluir este extrato? Os lançamentos feitos a partir dele continuam no sistema.'))return;const {error}=await sb.from('extratos').delete().eq('id',b.dataset.id);if(error)throw error;const E=stExt();if(E.aberto===b.dataset.id)E.aberto=null;toast('Extrato excluído.');render(true)},
+  'ext-ignorar':async b=>{const {error}=await sb.from('extrato_linhas').update({status:'ignorado'}).eq('id',b.dataset.id);if(error)throw error;stExt().sel.delete(b.dataset.id);render(true)},
+  'ext-reabrir':async b=>{const {error}=await sb.from('extrato_linhas').update({status:'nao_lancado'}).eq('id',b.dataset.id);if(error)throw error;render(true)},
+  'ext-vincular':async b=>{const l=stExt()._ls.find(x=>x.id===b.dataset.id);const m=l?.match;if(!m)return;
+    const {error}=await sb.from('extrato_linhas').update({status:m.tipo,parcela_id:m.p.id,diferenca:m.tipo==='valor_diferente'?m.dif:null}).eq('id',l.id);if(error)throw error;toast('Linha vinculada à baixa.');render(true)},
+  'ext-baixar':async b=>{const E=stExt();const l=E._ls.find(x=>x.id===b.dataset.id);if(!l)return;const x=(await sb.from('extratos').select('conta_bancaria_id').eq('id',E.aberto).single()).data;
+    const {error}=await sb.from('parcelas').update({status:'paga',data_pagamento:l.data,valor_pago:r2(+l.valor),conta_bancaria_id:x.conta_bancaria_id,forma_pagamento:'Extrato bancário'}).eq('id',b.dataset.parc);if(error)throw error;
+    const {error:e2}=await sb.from('extrato_linhas').update({status:'conciliado',parcela_id:b.dataset.parc}).eq('id',l.id);if(e2)throw e2;invalidar();toast('Baixa registrada pelo extrato.');render(true)},
+  'ext-sel-todas':()=>{const E=stExt();(E._ls||[]).filter(l=>l.status==='nao_lancado'&&(E.contas[l.id]??l.conta_sugerida_id)).forEach(l=>E.sel.add(l.id));render(true)},
+  'ext-lancar':async b=>{b.disabled=true;await lancarLinhas()},
+};
+document.addEventListener('change',ev=>{const t=ev.target;
+  if(t.id==='arqExt'&&t.files[0]){lerExtratoEnviado(t.files[0]);t.value=''}
+  else if(t.id==='extEmp'){const E=stExt();E.emp=t.value;E.banco=null;E.prev=null;E.aberto=null;render(true)}
+  else if(t.id==='extBanco'){const E=stExt();E.banco=t.value;E.prev=null;E.aberto=null;render(true)}
+  else if(t.dataset?.extconta){const E=stExt();E.contas[t.dataset.extconta]=t.value||null;if(t.value)E.sel.add(t.dataset.extconta);const bt=document.querySelector('[data-acao=ext-lancar]');const c=document.querySelector(`[data-extsel="${t.dataset.extconta}"]`);if(c)c.checked=!!t.value||c.checked;if(bt)bt.textContent=`Lançar ${E.sel.size||''} selecionada${E.sel.size===1?'':'s'}`}
+  else if(t.dataset?.extsel){const E=stExt();t.checked?E.sel.add(t.dataset.extsel):E.sel.delete(t.dataset.extsel);const bt=document.querySelector('[data-acao=ext-lancar]');if(bt)bt.textContent=`Lançar ${E.sel.size||''} selecionada${E.sel.size===1?'':'s'}`}
+});
+</script>
+<script>
 // ===================== navegação e filtros
 const ROTAS=[
  ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['boletos','Boletos do e-mail'],['lancamentos','Lançamentos'],
- ['g','Controle'],['auditoria','Auditoria de extratos',1],['nfs','Notas fiscais',1],['estoque','Estoque',1],
+ ['g','Controle'],['auditoria','Extratos e conciliação'],['nfs','Notas fiscais',1],['estoque','Estoque',1],
  ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],['salario','Salário líquido (PF)'],
  ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['bancos','Contas bancárias'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,boletos:vBoletos,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario};
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,boletos:vBoletos,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario,auditoria:vExtratos};
 const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','boletos','faturamento']);
 function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
 function renderNav(r){
@@ -2261,7 +2542,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='novo-lanc')formLanc();
   else if(a==='baixar')formBaixa(b.dataset.id);
   else if(ACOES_BOL[a])await ACOES_BOL[a](b);
-  else if(a==='excluir-lanc'){if(!confirm('Excluir este lançamento e suas parcelas?'))return;const {error}=await sb.from('lancamentos').delete().eq('id',b.dataset.id);if(error)throw error;invalidar();fecharDrawer();toast('Lançamento excluído.');render()}
+  else if(a==='excluir-lanc'){if(!confirm('Excluir este lançamento e suas parcelas?'))return;await soltarExtrato([b.dataset.id]);const {error}=await sb.from('lancamentos').delete().eq('id',b.dataset.id);if(error)throw error;invalidar();fecharDrawer();toast('Lançamento excluído.');render()}
   else if(a==='nova-conta')formConta();
   else if(formsCad[a])drawer(formsCad[a](b.dataset.emp));
   else if(a==='importar'){b.disabled=true;await executarImport()}
@@ -2271,6 +2552,7 @@ document.addEventListener('click',async ev=>{
   else if(ACOES_FAT[a])await ACOES_FAT[a](b);
   else if(ACOES_ORC[a])await ACOES_ORC[a](b);
   else if(ACOES_PF[a])await ACOES_PF[a](b);
+  else if(ACOES_EXT[a])await ACOES_EXT[a](b);
   else if(a==='limpar-fx'){S.fx={cc:new Set(),pf:new Set(),ct:new Set()};fecharDrawer();atualizaFxBtn();render()}
   else if(a==='gerar-link'){b.disabled=true;const r=await chamarAdmin({acao:'link',email:b.dataset.email,redirectTo:BASE_URL});mostrarLink(b.dataset.email,r.link,false)}
   else if(a==='copiar-link'){const t=document.getElementById('linkAcesso');try{await navigator.clipboard.writeText(t.value);toast('Link copiado.')}catch(e){t.select();toast('Selecionei o link: copie com o menu do celular.')}}
