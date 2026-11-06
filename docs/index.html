@@ -440,9 +440,10 @@ const LINHAS_DRE=[
  ['(-) Despesas operacionais','dop','l2',['despesas_operacionais']],['EBITDA','eb','tot'],['Margem EBITDA','me','pct'],
  ['(+/-) Resultado financeiro','rf','l2',['resultado_financeiro']],['(+/-) Outras e não operacionais','ou','l2',['outras','nao_operacional']],
  ['Resultado antes do IR','lair','tot'],['(-) IR e CSLL','ir','l2',['ir_csll']],['Lucro líquido','ll','tot'],['Margem líquida','ml','pct']];
+const ehTransf=c=>!!c&&!c.grupo_dre&&/^TRANSFERENCIA/.test(norm(c.nome));
 function dre(ls){
   const G={},C={};let semGrupo=0;
-  for(const l of ls){const c=conta(l.conta_id);const g=c?.grupo_dre;if(!g){semGrupo+=+l.valor;continue}G[g]=(G[g]||0)+ +l.valor;C[l.conta_id]=(C[l.conta_id]||0)+ +l.valor}
+  for(const l of ls){const c=conta(l.conta_id);if(ehTransf(c))continue;const g=c?.grupo_dre;if(!g){semGrupo+=+l.valor;continue}G[g]=(G[g]||0)+ +l.valor;C[l.conta_id]=(C[l.conta_id]||0)+ +l.valor}
   const v=x=>G[x]||0;
   const d={rb:v('receita_bruta'),de:v('deducoes'),cu:v('custos'),dop:v('despesas_operacionais'),rf:v('resultado_financeiro'),ou:v('outras')+v('nao_operacional'),ir:v('ir_csll')};
   d.rl=d.rb+d.de;d.lb=d.rl+d.cu;d.eb=d.lb+d.dop;d.lair=d.eb+d.rf+d.ou;d.ll=d.lair+d.ir;
@@ -580,8 +581,9 @@ async function vDRE(){
 <script>
 // ===================== Fluxo de caixa (realizado pelas parcelas pagas)
 async function vFluxo(){
-  const [pagas,abertas]=await Promise.all([parcelasPagas(S.ano),parcelasAbertas()]);
-  const ps=pagas.filter(parcNaSel);
+  const [pagas,abertas0]=await Promise.all([parcelasPagas(S.ano),parcelasAbertas()]);
+  const naoTr=p=>!ehTransf(conta(p.lancamentos?.conta_id));const abertas=abertas0.filter(naoTr);
+  const ps=pagas.filter(p=>parcNaSel(p)&&naoTr(p));
   const ab=abertas.filter(p=>parcNaSel(p)&&p.vencimento.startsWith(String(S.ano)));
   if(!ps.length&&!ab.length)return vazio('Nenhum pagamento ou recebimento em '+S.ano,'<p style="margin:0">O fluxo de caixa usa as parcelas com data de pagamento. Lançamentos importados com “Data Pagamento” aparecem aqui.</p>',podeEditarAlguma()?'<a class="btn" href="#importar">Importar planilha</a>':'');
   const ent=Array(12).fill(0),sai=Array(12).fill(0),pEnt=Array(12).fill(0),pSai=Array(12).fill(0);
@@ -726,7 +728,7 @@ async function vLancamentos(){
   ls=ls.slice().sort((a,b)=>b.competencia.localeCompare(a.competencia));
   return `<div class="panel"><div class="ph"><div><h2>Lançamentos · ${labelPer()}</h2><p class="hint">${esc(escopo())} · ${total} lançamentos${S.lancBusca?`, ${ls.length} na busca`:''}</p></div>
     <div class="ctrls"><input type="text" id="lancBusca" placeholder="Buscar descrição, parceiro, conta…" value="${esc(S.lancBusca)}" aria-label="Buscar lançamentos" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;background:var(--surface);min-width:0;width:240px;max-width:100%">
-    ${podeEditarAlguma()?'<button class="btn" data-acao="novo-lanc">Novo lançamento</button>':''}</div></div>
+    ${podeEditarAlguma()?'<button class="btn ghost" data-acao="nova-transf">Transferência entre contas</button><button class="btn" data-acao="novo-lanc">Novo lançamento</button>':''}</div></div>
     ${ls.length?`<div class="tbl-wrap"><table><thead><tr><th>Competência</th><th>Conta</th><th>Descrição / parceiro</th><th>Centro de custo</th><th>Empresa / prédio</th><th class="n">Valor</th></tr></thead><tbody>
     ${ls.slice(0,400).map(l=>{const c=conta(l.conta_id);return `<tr class="click" data-lanc="${l.id}"><td class="mono">${dataBR(l.competencia)}</td><td>${esc(c?.codigo)} ${esc(c?.nome)}</td><td>${esc(l.descricao||'')}<span class="unit">${esc(parceiro(l.parceiro_id)?.nome||'')}</span></td><td>${esc(centro(l.centro_custo_id)?.nome||'')}</td><td>${esc(nomeEmp(empresa(l.empresa_id)))}<span class="unit">${esc(predio(l.predio_id)?.nome||'')}</span></td><td class="n ${l.valor<0?'neg':''}">${brl2.format(l.valor)}</td></tr>`}).join('')}
     </tbody></table></div>${ls.length>400?`<p class="muted">Mostrando 400 de ${ls.length}. Use a busca ou um período menor.</p>`:''}`:'<p class="muted">Nenhum lançamento encontrado.</p>'}</div>`;
@@ -780,32 +782,52 @@ async function abrirLanc(id){
 }
 
 // ===================== Plano de contas
-function vPlano(){
+async function vPlano(){
   const emps=S.empresas;if(!emps.length)return semEmpresa();
   if(!emps.some(e=>e.id===S.planoEmp))S.planoEmp=(selEmp()[0]||emps[0]).id;
   const cs=S.contas.filter(c=>c.empresa_id===S.planoEmp).sort((a,b)=>a.codigo.localeCompare(b.codigo,undefined,{numeric:true}));
   const nivel=c=>{let n=0,p=c;while(p?.conta_pai&&n<6){p=conta(p.conta_pai);n++}return n};
   const ed=podeEditar(S.planoEmp);
-  return `<div class="panel"><div class="ph"><div><h2>Plano de contas</h2><p class="hint">Contas analíticas recebem lançamentos. O grupo da DRE define em que linha a conta aparece.</p></div>
-    <div class="ctrls"><select id="planoEmp" aria-label="Empresa">${opcoesEmp(S.planoEmp,false)}</select>${ed?'<button class="btn" data-acao="nova-conta">Nova conta</button>':''}</div></div>
-    <div class="tbl-wrap"><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Grupo da DRE</th><th>Uso</th><th>Situação</th></tr></thead><tbody>
-    ${cs.map(c=>`<tr class="${ed?'click':''}" ${ed?`data-conta="${c.id}"`:''}><td class="mono">${esc(c.codigo)}</td><td style="padding-left:${10+nivel(c)*16}px;${c.analitica?'':'font-weight:700'}">${esc(c.nome)}</td><td>${c.tipo==='receita'?'Receita':'Despesa'}</td><td>${c.grupo_dre?esc(GRUPOS[c.grupo_dre]):c.analitica?'<span class="chip warn">sem grupo</span>':'<span class="muted">–</span>'}</td><td>${c.analitica?'Analítica':'<span class="muted">Sintética</span>'}</td><td>${c.ativa?'<span class="chip good">Ativa</span>':'<span class="chip mute">Inativa</span>'}</td></tr>`).join('')}
+  const usos=await usoContas(S.planoEmp);S._usos=usos;
+  const temTr=cs.some(c=>ehTransf(c)&&c.analitica);
+  const nA=cs.filter(c=>c.analitica&&c.ativa).length,semG=cs.filter(c=>c.analitica&&c.ativa&&!c.grupo_dre&&!ehTransf(c)).length;
+  const tiles=[['Contas analíticas',String(nA),'','recebem lançamentos'],['Contas sintéticas',String(cs.filter(c=>!c.analitica).length),'','agrupam as analíticas'],
+    ['Sem grupo da DRE',String(semG),semG?'<span class="chip warn">ficam fora da DRE</span>':'<span class="chip good">tudo classificado</span>',''],
+    ['Transferências',temTr?'Prontas':'Não criadas',temTr?'<span class="chip good">fora da DRE</span>':'<span class="chip mute">opcional</span>','entre contas bancárias']];
+  return `<div class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">${tiles.map(([l,v,c,x])=>`<div class="tile"><span class="lbl">${l}</span><span class="val">${v}</span><span class="cmp">${c}${x}</span></div>`).join('')}</div>
+  <div class="panel"><div class="ph"><div><h2>Plano de contas</h2><p class="hint">Clique numa conta para alterar código, nome, tipo, grupo da DRE ou conta superior. Contas sem uso podem ser excluídas; as usadas podem ser inativadas.</p></div>
+    <div class="ctrls"><select id="planoEmp" aria-label="Empresa">${opcoesEmp(S.planoEmp,false)}</select>${ed&&!temTr?'<button class="btn ghost" data-acao="criar-transf">Criar contas de transferência</button>':''}${ed?'<button class="btn" data-acao="nova-conta">Nova conta</button>':''}</div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Grupo da DRE</th><th>Uso</th><th class="n">Lançamentos</th><th>Situação</th>${ed?'<th></th>':''}</tr></thead><tbody>
+    ${cs.map(c=>`<tr class="${ed?'click':''}" ${ed?`data-conta="${c.id}"`:''}><td class="mono">${esc(c.codigo)}</td><td style="padding-left:${10+nivel(c)*16}px;${c.analitica?'':'font-weight:700'}">${esc(c.nome)}</td><td>${c.tipo==='receita'?'Receita':'Despesa'}</td><td>${c.grupo_dre?esc(GRUPOS[c.grupo_dre]):ehTransf(c)?'<span class="chip info">transferência · fora da DRE</span>':c.analitica?'<span class="chip warn">sem grupo</span>':'<span class="muted">–</span>'}</td><td>${c.analitica?'Analítica':'<span class="muted">Sintética</span>'}</td><td class="n">${usos[c.id]||(c.analitica?'<span class="muted">0</span>':'')}</td><td>${c.ativa?'<span class="chip good">Ativa</span>':'<span class="chip mute">Inativa</span>'}</td>
+      ${ed?`<td style="white-space:nowrap"><button class="linkbtn small" data-acao="editar-conta" data-id="${c.id}">Editar</button>${c.analitica?'':` · <button class="linkbtn small" data-acao="nova-subconta" data-id="${c.id}">+ Subconta</button>`}</td>`:''}</tr>`).join('')}
     </tbody></table></div></div>`;
 }
-function formConta(id){
+async function usoContas(emp){const ls=await todos(()=>sb.from('lancamentos').select('conta_id').eq('empresa_id',emp));const o={};ls.forEach(l=>o[l.conta_id]=(o[l.conta_id]||0)+1);return o}
+function proxCodigo(emp,pai){const p=pai?conta(pai):null;const usados=new Set(S.contas.filter(c=>c.empresa_id===emp).map(c=>c.codigo));
+  const irm=S.contas.filter(c=>c.empresa_id===emp&&(c.conta_pai||null)===(pai||null)).map(c=>c.codigo);
+  if(!p){let n=Math.max(0,...irm.map(x=>parseInt(x)||0))+1;while(usados.has(String(n)))n++;return String(n)}
+  const base=p.codigo,rests=irm.filter(x=>x.startsWith(base+'.')).map(x=>x.slice(base.length+1).split('.'));
+  let cod;if(rests.length){const ref=rests.sort((a,b)=>(+b[0]||0)-(+a[0]||0))[0];let n=(+ref[0]||0)+1;
+    do{cod=base+'.'+String(n).padStart(ref[0].length,'0')+ref.slice(1).map(x=>'.'+'1'.padStart(x.length,'0')).join('');n++}while(usados.has(cod))}
+  else{cod=base.includes('.')?base+'.001':base+'.01.001';let n=1;while(usados.has(cod))cod=base.includes('.')?base+'.'+String(++n).padStart(3,'0'):base+'.01.'+String(++n).padStart(3,'0')}
+  return cod}
+function formConta(id,paiNovo){
   const c=id?conta(id):null;const emp=c?c.empresa_id:S.planoEmp;
+  const pai0=c?c.conta_pai:(paiNovo||null);const pp=pai0?conta(pai0):null;
   const pais=S.contas.filter(x=>x.empresa_id===emp&&!x.analitica&&x.id!==id);
-  drawer(`<h3>${c?'Editar conta':'Nova conta'}</h3>
+  const usos=c?(S._usos?.[c.id]||0):0;const filhos=c?S.contas.filter(x=>x.conta_pai===c.id).length:0;
+  drawer(`<h3>${c?'Editar conta':pp?'Nova subconta de '+esc(pp.nome):'Nova conta'}</h3>
   <form data-form="conta" data-id="${c?.id||''}" class="form-grid">
     <input type="hidden" name="empresa" value="${emp}">
-    <div class="field"><label for="cCod">Código</label><input id="cCod" name="codigo" required value="${esc(c?.codigo||'')}" placeholder="5.02.004" ${c?'readonly':''}></div>
+    <div class="field"><label for="cCod">Código</label><input id="cCod" name="codigo" required value="${esc(c?.codigo||proxCodigo(emp,pai0))}" placeholder="5.02.004"></div>
     <div class="field" style="grid-column:span 2"><label for="cNome">Nome</label><input id="cNome" name="nome" required value="${esc(c?.nome||'')}"></div>
-    <div class="field"><label for="cTipo">Tipo</label><select id="cTipo" name="tipo"><option value="despesa" ${c?.tipo==='despesa'?'selected':''}>Despesa</option><option value="receita" ${c?.tipo==='receita'?'selected':''}>Receita</option></select></div>
-    <div class="field"><label for="cGrupo">Grupo da DRE</label><select id="cGrupo" name="grupo"><option value="">Nenhum</option>${Object.entries(GRUPOS).map(([v,n])=>`<option value="${v}" ${c?.grupo_dre===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    <div class="field"><label for="cTipo">Tipo</label><select id="cTipo" name="tipo"><option value="despesa" ${(c?.tipo||pp?.tipo)!=='receita'?'selected':''}>Despesa</option><option value="receita" ${(c?.tipo||pp?.tipo)==='receita'?'selected':''}>Receita</option></select></div>
+    <div class="field"><label for="cGrupo">Grupo da DRE</label><select id="cGrupo" name="grupo"><option value="">Nenhum (fora da DRE)</option>${Object.entries(GRUPOS).map(([v,n])=>`<option value="${v}" ${(c?c.grupo_dre:pp?.grupo_dre)===v?'selected':''}>${n}</option>`).join('')}</select></div>
     <div class="field"><label for="cAnal">Uso</label><select id="cAnal" name="analitica"><option value="1" ${!c||c.analitica?'selected':''}>Analítica (recebe lançamentos)</option><option value="0" ${c&&!c.analitica?'selected':''}>Sintética (agrupa)</option></select></div>
-    <div class="field wide"><label for="cPai">Conta superior</label><select id="cPai" name="pai"><option value="">Nenhuma (conta raiz)</option>${pais.map(p=>`<option value="${p.id}" ${c?.conta_pai===p.id?'selected':''}>${esc(p.codigo)} ${esc(p.nome)}</option>`).join('')}</select><small class="muted">Níveis: Conta › Subconta › Subconta v2 (opcional). Para lançar numa Subconta v2, crie-a abaixo de uma subconta sintética.</small></div>
-    ${c?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativa" ${c.ativa?'checked':''}> Conta ativa</label>`:''}
-    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+    <div class="field wide"><label for="cPai">Conta superior</label><select id="cPai" name="pai"><option value="">Nenhuma (conta raiz)</option>${pais.map(p=>`<option value="${p.id}" ${pai0===p.id?'selected':''}>${esc(p.codigo)} ${esc(p.nome)}</option>`).join('')}</select><small class="muted">Níveis: Conta › Subconta › Subconta v2 (opcional). Para lançar numa Subconta v2, crie-a abaixo de uma subconta sintética.</small></div>
+    ${c?`<label class="wide" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativa" ${c.ativa?'checked':''}> Conta ativa</label>
+    <p class="muted wide" style="margin:0;font-size:12.5px">${usos?`${usos} lançamento${usos>1?'s usam':' usa'} esta conta. Mudanças de nome, grupo ou tipo valem para todos eles.`:'Nenhum lançamento usa esta conta.'}${c.analitica&&usos?' Para não usar mais, desmarque “Conta ativa”.':''}</p>`:''}
+    <div class="wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button>${c&&!usos&&!filhos?`<button type="button" class="btn ghost" data-acao="excluir-conta" data-id="${c.id}" style="color:var(--bad);margin-left:auto">Excluir conta</button>`:''}</div></form>`);
 }
 
 // ===================== Empresas e prédios
@@ -1406,7 +1428,7 @@ async function caixaDaVersao(v){
   if(v.congelada){S.caixaOrc=S.caixaOrc||{};if(!S.caixaOrc[v.id])S.caixaOrc[v.id]=await todos(()=>sb.from('orcamento_caixa').select('conta_id,data_caixa,valor').eq('versao_id',v.id));return S.caixaOrc[v.id].map(x=>({conta_id:x.conta_id,data:x.data_caixa,valor:+x.valor}))}
   const ls=await linhasDe(v.id);return ls.flatMap(l=>caixaDaLinha(l.conta_id,l.competencia,+l.valor).map(c=>({conta_id:l.conta_id,data:c.data,valor:c.valor,linha_id:l.id})));
 }
-const contasOrc=emp=>S.contas.filter(c=>c.empresa_id===emp&&c.analitica&&c.ativa).sort((a,b)=>{const ga=ORDEM_GRUPOS.indexOf(a.grupo_dre),gb=ORDEM_GRUPOS.indexOf(b.grupo_dre);return (ga<0?99:ga)-(gb<0?99:gb)||a.codigo.localeCompare(b.codigo,undefined,{numeric:true})});
+const contasOrc=emp=>S.contas.filter(c=>c.empresa_id===emp&&c.analitica&&c.ativa&&!ehTransf(c)).sort((a,b)=>{const ga=ORDEM_GRUPOS.indexOf(a.grupo_dre),gb=ORDEM_GRUPOS.indexOf(b.grupo_dre);return (ga<0?99:ga)-(gb<0?99:gb)||a.codigo.localeCompare(b.codigo,undefined,{numeric:true})});
 const sinal=c=>c?.tipo==='receita'?1:-1;
 const parseCel=v=>{const t=String(v??'').trim().replace(/[R$\s]/g,'');if(!t)return 0;if(t.includes(','))return parseFloat(t.replace(/\./g,'').replace(',','.'))||0;if(/^-?\d{1,3}(\.\d{3})+$/.test(t))return parseFloat(t.replace(/\./g,''))||0;return parseFloat(t)||0};
 const fmtIn=v=>v?String(Math.round(Math.abs(v)*100)/100).replace('.',','):'';
@@ -1864,7 +1886,7 @@ async function vBancos(){
       <td>${b.ativa===false?'<span class="chip mute">Inativa</span>':'<span class="chip good">Ativa</span>'}</td></tr>`}).join(''):`<tr><td colspan="8" class="muted">Nenhuma conta cadastrada nesta empresa.</td></tr>`});
   return `<div class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">${tiles.map(([l,v,c,s])=>`<div class="tile"><span class="lbl">${l}</span><span class="val">${v}</span><span class="cmp">${c}${s}</span></div>`).join('')}</div>
   <div class="panel"><div class="ph"><div><h2>Contas bancárias</h2><p class="hint">O saldo atual soma o saldo inicial com as parcelas baixadas em cada conta. Clique numa conta para editar.</p></div>
-    <div class="ctrls"><select id="bancoEmp" aria-label="Empresa"><option value="*">Todas as empresas</option>${opcoesEmp(S.bancoEmp,false)}</select>${ed?'<button class="btn" data-acao="nova-conta-banc">Nova conta bancária</button>':''}</div></div>
+    <div class="ctrls"><select id="bancoEmp" aria-label="Empresa"><option value="*">Todas as empresas</option>${opcoesEmp(S.bancoEmp,false)}</select>${ed?'<button class="btn ghost" data-acao="nova-transf">Transferência entre contas</button><button class="btn" data-acao="nova-conta-banc">Nova conta bancária</button>':''}</div></div>
     <div class="tbl-wrap"><table><thead><tr><th>Banco</th><th>Agência</th><th>Conta</th><th class="n">Saldo inicial</th><th class="n">Entradas</th><th class="n">Saídas</th><th class="n">Saldo atual</th><th>Situação</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="muted">Nenhuma conta cadastrada.</td></tr>'}</tbody>
     ${bs.length?`<tfoot><tr class="tot"><td colspan="6">Total das contas ativas</td><td class="n ${tot<0?'neg':''}">${brl2.format(tot)}</td><td></td></tr></tfoot>`:''}</table></div></div>`;
 }
@@ -2027,7 +2049,49 @@ FORMS_PF['lanc-edit']=async f=>{const A=S._lancAberto;if(!A||A.l.id!==f.dataset.
   else if(ps.length>1&&v!==+old.valor){const pagas=sum(ps.filter(p=>p.status==='paga').map(p=>p.valor)),ab=ps.filter(p=>p.status==='aberta'),totAb=sum(ab.map(p=>p.valor));const resto=r2(v-pagas);
     if(ab.length&&totAb){let acc=0;for(let i=0;i<ab.length;i++){const nv=i<ab.length-1?r2(ab[i].valor/totAb*resto):r2(resto-acc);acc=r2(acc+nv);const {error:e3}=await sb.from('parcelas').update({valor:nv,centro_custo_id:f.centro.value||null}).eq('id',ab[i].id);if(e3)throw e3}}}
   S._lancAberto=null;invalidar();await carregarAnos();fecharDrawer();toast('Lançamento atualizado.');render()};
+async function contasTransf(emp){
+  let ent=S.contas.find(c=>c.empresa_id===emp&&c.analitica&&ehTransf(c)&&c.tipo==='receita'),sai=S.contas.find(c=>c.empresa_id===emp&&c.analitica&&ehTransf(c)&&c.tipo==='despesa');
+  if(ent&&sai)return {ent,sai};
+  let pai=S.contas.find(c=>c.empresa_id===emp&&!c.analitica&&ehTransf(c));
+  const ins=async row=>{const {data,error}=await sb.from('plano_contas').insert({empresa_id:emp,ativa:true,grupo_dre:null,...row}).select().single();if(error)throw error;S.contas.push(data);return data};
+  if(!pai)pai=await ins({codigo:proxCodigo(emp,null),nome:'Transferências entre contas',tipo:'despesa',analitica:false,conta_pai:null});
+  const livre=(c)=>!S.contas.some(x=>x.empresa_id===emp&&x.codigo===c);const cE=pai.codigo+'.01.001',cS=pai.codigo+'.01.002';
+  if(!ent)ent=await ins({codigo:livre(cE)?cE:proxCodigo(emp,pai.id),nome:'Transferência · entrada',tipo:'receita',analitica:true,conta_pai:pai.id});
+  if(!sai)sai=await ins({codigo:livre(cS)?cS:proxCodigo(emp,pai.id),nome:'Transferência · saída',tipo:'despesa',analitica:true,conta_pai:pai.id});
+  return {ent,sai}}
+function formTransf(){
+  const emps=S.empresas.filter(e=>podeEditar(e.id)&&S.bancos.filter(b=>b.empresa_id===e.id&&b.ativa!==false).length>=2);
+  if(!emps.length)return drawer(`<h3>Transferência entre contas</h3><div class="effect">Para transferir, a empresa precisa de pelo menos duas contas bancárias ativas. Cadastre em <a href="#bancos">Contas bancárias</a>.</div><div><button class="btn ghost" data-acao="fechar">Fechar</button></div>`);
+  const emp=(emps.find(e=>e.id===S.bancoEmp)||emps.find(e=>selEmp().some(x=>x.id===e.id))||emps[0]).id;
+  const ops=(e,skip)=>S.bancos.filter(b=>b.empresa_id===e&&b.ativa!==false).map((b,i)=>`<option value="${b.id}" ${i===skip?'selected':''}>${esc(bancoTxt(b))}</option>`).join('');
+  drawer(`<h3>Transferência entre contas</h3><p class="muted" style="margin:0">Registra a saída de uma conta e a entrada na outra, já baixadas. Não entra na DRE nem no fluxo de caixa consolidado; só muda o saldo de cada conta.</p>
+  <form data-form="transf" class="form-grid">
+    <div class="field wide"><label for="tEmp">Empresa</label><select id="tEmp" name="empresa" data-troca-transf>${emps.map(e=>`<option value="${e.id}" ${e.id===emp?'selected':''}>${esc(nomeEmp(e))}</option>`).join('')}</select></div>
+    <div class="field" style="grid-column:span 2"><label for="tDe">Sai da conta</label><select id="tDe" name="de">${ops(emp,0)}</select></div>
+    <div class="field"><label for="tVal">Valor (R$)</label><input id="tVal" name="valor" required inputmode="decimal" placeholder="500,00"></div>
+    <div class="field" style="grid-column:span 2"><label for="tPara">Entra na conta</label><select id="tPara" name="para">${ops(emp,1)}</select></div>
+    <div class="field"><label for="tData">Data</label><input id="tData" name="data" type="date" required value="${HOJE}"></div>
+    <div class="field wide"><label for="tDesc">Descrição</label><input id="tDesc" name="descricao" placeholder="PIX Nubank para Caixa"></div>
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">Registrar transferência</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+}
+FORMS_PF.transf=async f=>{const emp=f.empresa.value,de=f.de.value,para=f.para.value;let v=parseValor(f.valor.value);
+  if(!de||!para||de===para)return toast('Escolha duas contas diferentes.');if(isNaN(v)||!v)return toast('Informe um valor válido.');v=r2(Math.abs(v));
+  const {ent,sai}=await contasTransf(emp);const bd=banco(de),bp=banco(para);const dt=f.data.value;
+  const desc=f.descricao.value.trim()||`Transferência ${bd.banco_nome} → ${bp.banco_nome}`;
+  const idS=uuid(),idE=uuid();
+  await lotes('lancamentos',[{id:idS,empresa_id:emp,conta_id:sai.id,competencia:dt,descricao:desc,valor:-v}]);
+  await lotes('lancamentos',[{id:idE,empresa_id:emp,conta_id:ent.id,competencia:dt,descricao:desc,valor:v,vinculo_id:idS}]);
+  await lotes('parcelas',[{empresa_id:emp,lancamento_id:idS,numero:1,vencimento:dt,valor:-v,data_pagamento:dt,valor_pago:-v,forma_pagamento:'Transferência',status:'paga',conta_bancaria_id:de},
+    {empresa_id:emp,lancamento_id:idE,numero:1,vencimento:dt,valor:v,data_pagamento:dt,valor_pago:v,forma_pagamento:'Transferência',status:'paga',conta_bancaria_id:para}]);
+  invalidar();await carregarAnos();fecharDrawer();toast('Transferência registrada.');render()};
 const ACOES_PF={
+  'nova-transf':()=>formTransf(),
+  'criar-transf':async()=>{await contasTransf(S.planoEmp);toast('Contas de transferência criadas.');render(true)},
+  'editar-conta':b=>formConta(b.dataset.id),
+  'nova-subconta':b=>formConta(null,b.dataset.id),
+  'excluir-conta':async b=>{const c=conta(b.dataset.id);if(!c||!confirm('Excluir a conta '+c.codigo+' '+c.nome+'?'))return;const {error}=await sb.from('plano_contas').delete().eq('id',c.id);
+    if(error){if(error.code==='23503')return toast('Esta conta é usada em orçamento, premissas, regras ou extratos. Desmarque “Conta ativa” em vez de excluir.');throw error}
+    fecharDrawer();toast('Conta excluída.');await recarregarCad()},
   'nova-conta-banc':()=>formBanco(),
   'editar-banco':b=>formBanco(b.dataset.id),
   'novo-banco':b=>formBanco(null,b.dataset.emp),
@@ -2040,6 +2104,7 @@ document.addEventListener('change',ev=>{const t=ev.target;
   else if(['salBruto','salDep','salOutros'].includes(t.id)){lerSal();render(true)}
   else if(t.id==='salEmp'){lerSal();S.sal.emp=t.value;render(true)}
   else if(t.id==='rN')prevReplicar();
+  else if(t.hasAttribute?.('data-troca-transf')){const f=t.form;const bs=S.bancos.filter(b=>b.empresa_id===t.value&&b.ativa!==false);const o=i=>bs.map((b,j)=>`<option value="${b.id}" ${j===i?'selected':''}>${esc(bancoTxt(b))}</option>`).join('');f.de.innerHTML=o(0);f.para.innerHTML=o(1)}
   else if(t.hasAttribute?.('data-troca-banc')){const f=t.form;f.dataset.emp=t.value;f.predio.innerHTML=`<option value="">Empresa toda</option>${S.predios.filter(p=>p.empresa_id===t.value).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')}`}});
 document.addEventListener('input',ev=>{const t=ev.target;if(t.id==='bNome'){const b=BANCOS_BR.find(([n])=>norm(n)===norm(t.value));if(b&&!t.form.codigo.value)t.form.codigo.value=b[1]}});
 document.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&['salBruto','salDep','salOutros'].includes(ev.target.id)){ev.preventDefault();lerSal();render(true)}});
@@ -2467,8 +2532,10 @@ const FORMS={
     if(error)throw error;invalidar();fecharDrawer();toast('Baixa registrada.');render()},
   async conta(f){const id=f.dataset.id;const pai=f.pai.value||null;
     const dados={nome:f.nome.value.trim(),tipo:f.tipo.value,grupo_dre:f.grupo.value||null,analitica:f.analitica.value==='1',conta_pai:pai};
-    if(id){dados.ativa=f.ativa.checked;const {error}=await sb.from('plano_contas').update(dados).eq('id',id);if(error)throw error}
-    else{const {error}=await sb.from('plano_contas').insert({...dados,empresa_id:f.empresa.value,codigo:f.codigo.value.trim()});if(error)throw error}
+    if(id&&pai===id)return toast('A conta não pode ficar abaixo dela mesma.');
+    const cod=f.codigo.value.trim();if(S.contas.some(c=>c.empresa_id===f.empresa.value&&c.codigo===cod&&c.id!==id))return toast('Já existe uma conta com o código '+cod+'.');
+    if(id){dados.ativa=f.ativa.checked;dados.codigo=cod;const {error}=await sb.from('plano_contas').update(dados).eq('id',id);if(error)throw error}
+    else{const {error}=await sb.from('plano_contas').insert({...dados,ativa:true,empresa_id:f.empresa.value,codigo:cod});if(error)throw error}
     fecharDrawer();toast('Conta salva.');await recarregarCad()},
   async empresa(f){const cnpj=soDig(f.cnpj.value);if(cnpj.length!==14)return toast('O CNPJ precisa ter 14 dígitos.');
     const {error}=await sb.rpc('criar_empresa',{p_cnpj:cnpj,p_razao_social:f.razao.value.trim(),p_nome_fantasia:f.fantasia.value.trim()||null});if(error)throw error;
@@ -2527,7 +2594,7 @@ document.addEventListener('click',async ev=>{
   const vb=ev.target.closest('[data-ver]');if(vb){if(S.orcEdit?.sujo){toast('Há valores não salvos. Salve antes de trocar de versão.');return}S.orcVer=vb.dataset.ver;S.orcEdit=null;S.acOrc=S.acFc=null;render(true);return}
   const ot=ev.target.closest('[data-orctab]');if(ot){S.orcTab=ot.dataset.orctab;render(true);return}
   const lr=ev.target.closest('[data-lanc]');if(lr){abrirLanc(lr.dataset.lanc);return}
-  const cr=ev.target.closest('[data-conta]');if(cr){formConta(cr.dataset.conta);return}
+  const cr=ev.target.closest('[data-conta]');if(cr&&!ev.target.closest('[data-acao]')){formConta(cr.dataset.conta);return}
   const b=ev.target.closest('[data-acao]');if(!b)return;const a=b.dataset.acao;
   try{
   if(a==='fechar')fecharDrawer();
@@ -2542,7 +2609,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='novo-lanc')formLanc();
   else if(a==='baixar')formBaixa(b.dataset.id);
   else if(ACOES_BOL[a])await ACOES_BOL[a](b);
-  else if(a==='excluir-lanc'){if(!confirm('Excluir este lançamento e suas parcelas?'))return;await soltarExtrato([b.dataset.id]);const {error}=await sb.from('lancamentos').delete().eq('id',b.dataset.id);if(error)throw error;invalidar();fecharDrawer();toast('Lançamento excluído.');render()}
+  else if(a==='excluir-lanc'){const A=S._lancAberto?.l;const tr=A&&A.id===b.dataset.id&&ehTransf(conta(A.conta_id))&&A.vinculo_id;if(!confirm(tr?'Excluir esta transferência (saída e entrada)?':'Excluir este lançamento e suas parcelas?'))return;const alvo=tr?A.vinculo_id:b.dataset.id;await soltarExtrato(tr?[A.id,A.vinculo_id]:[b.dataset.id]);const {error}=await sb.from('lancamentos').delete().eq('id',alvo);if(error)throw error;invalidar();fecharDrawer();toast('Lançamento excluído.');render()}
   else if(a==='nova-conta')formConta();
   else if(formsCad[a])drawer(formsCad[a](b.dataset.emp));
   else if(a==='importar'){b.disabled=true;await executarImport()}
