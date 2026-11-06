@@ -287,6 +287,7 @@ const IC={
  empresas:'<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4"/>',
  tributos:'<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
  importar:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+ boletos:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><path d="M7 16v-3M10 16v-3M13 16v-3M16 16v-3"/>',
  bancos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M10 10v8M14 10v8M19 10v8M3 21h18"/>',
  salario:'<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/>',
  usuarios:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
@@ -614,7 +615,9 @@ async function vContas(){
   const lado=S.cpLado==='pagar'?ab.filter(p=>p.valor<0):ab.filter(p=>p.valor>0);
   const venc=lado.filter(p=>p.vencimento<HOJE),sem=lado.filter(p=>p.vencimento>=HOJE&&p.vencimento<=addDias(HOJE,7)),mes=lado.filter(p=>p.vencimento.slice(0,7)===HOJE.slice(0,7));
   const tot=v=>brl.format(Math.abs(sum(v.map(p=>p.valor))));
-  return `<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+  let avisoBol='';if(S.cpLado==='pagar'){const {count}=await sb.from('boletos_email').select('id',{count:'exact',head:true}).eq('status','novo').in('empresa_id',selEmp().map(e=>e.id));
+    if(count)avisoBol=`<div class="effect" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><span>${icone('boletos',15)} Chegaram <b>${count} boleto${count>1?'s':''}</b> por e-mail que ainda não viraram conta a pagar.</span><a class="btn ghost" href="#boletos">Ver boletos</a></div>`}
+  return `${avisoBol}<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
     <div class="tile"><div class="lbl">Em aberto</div><div class="val">${tot(lado)}</div><div class="cmp">${lado.length} parcelas</div></div>
     <div class="tile"><div class="lbl">Vencido</div><div class="val">${tot(venc)}</div><div class="cmp">${venc.length?`<span class="chip bad">${venc.length} parcelas</span>`:'<span class="chip good">nada vencido</span>'}</div></div>
     <div class="tile"><div class="lbl">Próximos 7 dias</div><div class="val">${tot(sem)}</div><div class="cmp">${sem.length} parcelas</div></div>
@@ -637,6 +640,82 @@ function formBaixa(id){
       <div class="wide" style="display:flex;gap:8px"><button class="btn">Confirmar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`)});
 }
 
+// ===================== Boletos do e-mail
+const linhaFmt=d=>!d?'':d.length===47?`${d.slice(0,5)}.${d.slice(5,10)} ${d.slice(10,15)}.${d.slice(15,21)} ${d.slice(21,26)}.${d.slice(26,32)} ${d[32]} ${d.slice(33)}`:d.replace(/(\d{12})(?=\d)/g,'$1 ');
+const semTabelaBol=err=>/boletos_email|schema cache|does not exist/i.test(err?.message||'');
+async function vBoletos(){
+  const ids=selEmp().map(e=>e.id);
+  const [{data:bs,error},{data:tks}]=await Promise.all([
+    sb.from('boletos_email').select('*').in('empresa_id',ids).order('vencimento',{ascending:true,nullsFirst:false}).limit(500),
+    sb.from('boletos_email_token').select('*').in('empresa_id',ids)]);
+  if(error){if(semTabelaBol(error))return vazio('Boletos do e-mail ainda não está ativo','<p style="margin:0">Falta aplicar a atualização do banco de dados (migração 0011). Assim que ela for aplicada, esta tela passa a funcionar.</p>');throw error}
+  S.boletos=bs||[];S.bolTokens=tks||[];
+  const novos=S.boletos.filter(b=>b.status==='novo'),tratados=S.boletos.filter(b=>b.status!=='novo').sort((a,b)=>b.criado_em.localeCompare(a.criado_em)).slice(0,60);
+  const venc=novos.filter(b=>b.vencimento&&b.vencimento<HOJE),sem=novos.filter(b=>b.vencimento&&b.vencimento>=HOJE&&b.vencimento<=addDias(HOJE,7));
+  const tot=v=>brl.format(sum(v.map(b=>+b.valor||0)));
+  const ult=S.bolTokens.map(t=>t.ultimo_uso).filter(Boolean).sort().pop();
+  const multi=ids.length>1;
+  const situ=b=>!b.vencimento?['Sem data','mute']:statusParcela(b);
+  const linhaNovo=b=>{const [st,c]=situ(b);return `<tr><td class="mono">${dataBR(b.vencimento)||'–'}</td><td><span class="chip ${c}">${st}</span></td>
+    <td>${esc(b.beneficiario||b.remetente||'')}<span class="unit">${esc(b.assunto||'')}${b.recebido_em?' · recebido '+dataBR(b.recebido_em.slice(0,10)):''}</span>${b.observacao?`<span class="unit" style="color:var(--warn)">${esc(b.observacao)}</span>`:''}</td>
+    ${multi?`<td>${esc(nomeEmp(empresa(b.empresa_id)))}</td>`:''}
+    <td>${b.linha_digitavel?`<button class="linkbtn mono small" data-acao="bol-copiar" data-id="${b.id}" title="Copiar linha digitável" style="text-align:left;white-space:normal;font-size:12px;line-height:1.5;max-width:250px;display:inline-block">${esc(linhaFmt(b.linha_digitavel))}</button>`:'<span class="muted">–</span>'}</td>
+    <td class="n">${b.valor!=null?brl2.format(b.valor):'–'}</td>
+    <td>${podeEditar(b.empresa_id)?`<div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn" data-acao="bol-lancar" data-id="${b.id}">Lançar</button><button class="btn ghost" data-acao="bol-ignorar" data-id="${b.id}">Ignorar</button></div>`:''}</td></tr>`};
+  return `<section class="grid g-tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+    <div class="tile"><div class="lbl">Boletos a lançar</div><div class="val">${novos.length}</div><div class="cmp">${tot(novos)}</div></div>
+    <div class="tile"><div class="lbl">Vencidos sem lançar</div><div class="val">${tot(venc)}</div><div class="cmp">${venc.length?`<span class="chip bad">${venc.length} boleto${venc.length>1?'s':''}</span>`:'<span class="chip good">nenhum</span>'}</div></div>
+    <div class="tile"><div class="lbl">Vence nos próximos 7 dias</div><div class="val">${tot(sem)}</div><div class="cmp">${sem.length} boleto${sem.length===1?'':'s'}</div></div>
+    <div class="tile"><div class="lbl">Última leitura do e-mail</div><div class="val" style="font-size:16px">${ult?quandoBol(ult):'Ainda não ligado'}</div><div class="cmp">${S.bolTokens.length?`<span class="chip good">Gmail ligado</span>`:'<span class="chip mute">Gmail desligado</span>'}</div></div></section>
+  <div class="panel"><div class="ph"><div><h2>Boletos para lançar</h2><p class="hint">Chegaram por e-mail. Clique em Lançar para virar conta a pagar, ou em Ignorar se não for seu.</p></div>
+    ${podeEditarAlguma()?`<button class="btn ghost" data-acao="bol-config">${icone('boletos',15)} Ligar o Gmail</button>`:''}</div>
+    ${novos.length?`<div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Situação</th><th>Beneficiário / e-mail</th>${multi?'<th>Empresa</th>':''}<th>Linha digitável</th><th class="n">Valor</th><th></th></tr></thead><tbody>${novos.map(linhaNovo).join('')}</tbody></table></div>`
+      :`<p class="muted" style="margin:0">${S.bolTokens.length?'Nenhum boleto novo. O e-mail é verificado a cada hora.':'Nenhum boleto ainda. Clique em “Ligar o Gmail” para o app buscar os boletos sozinho.'}</p>`}</div>
+  ${tratados.length?`<div class="panel"><div class="ph"><div><h2>Já tratados</h2><p class="hint">Últimos ${tratados.length}</p></div></div><div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Beneficiário / e-mail</th><th>Situação</th><th class="n">Valor</th><th></th></tr></thead><tbody>
+    ${tratados.map(b=>`<tr><td class="mono">${dataBR(b.vencimento)||'–'}</td><td>${esc(b.beneficiario||b.remetente||'')}<span class="unit">${esc(b.assunto||'')}</span></td><td>${b.status==='lancado'?'<span class="chip good">Lançado</span>':'<span class="chip mute">Ignorado</span>'}</td><td class="n">${b.valor!=null?brl2.format(b.valor):'–'}</td>
+    <td>${b.status==='ignorado'&&podeEditar(b.empresa_id)?`<button class="linkbtn small" data-acao="bol-voltar" data-id="${b.id}">Voltar para a lista</button>`:''}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
+}
+function quandoBol(ts){const d=new Date(ts),min=Math.round((Date.now()-d)/60000);return min<2?'agora há pouco':min<60?`há ${min} min`:min<1440?`há ${Math.round(min/60)} h`:dataBR(ts.slice(0,10))}
+async function scriptBoletos(token){const r=await fetch('gmail/boletos.gs',{cache:'no-store'});if(!r.ok)throw new Error('Não consegui baixar o script.');
+  return (await r.text()).replace('__SUPABASE_URL__',SUPABASE_URL).replace('__SUPABASE_KEY__',SUPABASE_KEY).replace('__TOKEN__',token)}
+function formBolConfig(empId){
+  const emps=S.empresas.filter(e=>podeEditar(e.id));const emp=emps.find(e=>e.id===empId)||selEmp().find(e=>podeEditar(e.id))||emps[0];if(!emp)return;
+  const tk=(S.bolTokens||[]).find(t=>t.empresa_id===emp.id);
+  drawer(`<h3>${icone('boletos')} Ligar o Gmail</h3>
+  <p class="muted" style="margin:0">Um pequeno programa roda na sua própria conta Google, procura e-mails com boleto a cada hora e manda para cá a linha digitável, o valor e o vencimento. Nada é pago sozinho: cada boleto espera você lançar.</p>
+  <div class="field wide"><label for="bolEmp">Os boletos entram na empresa</label><select id="bolEmp">${opcoesEmp(emp.id)}</select></div>
+  ${tk?`<div class="effect">Ligado${tk.ultimo_uso?' · última leitura '+quandoBol(tk.ultimo_uso):' · ainda não leu nenhum e-mail'}.</div>`:''}
+  <ol style="margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px">
+    <li>${tk?'Copie o script desta empresa':'Gere o código desta empresa'} no botão abaixo.</li>
+    <li>Abra <a href="https://script.google.com/create" target="_blank" rel="noopener">script.google.com</a> com a conta do Gmail dos boletos, apague o que estiver lá e cole.</li>
+    <li>No menu da esquerda, em <b>Serviços</b> (+), adicione <b>Drive API</b>. Ela serve para ler o texto do PDF.</li>
+    <li>No topo, escolha a função <b>instalar</b> e clique em <b>Executar</b>. Autorize o acesso que o Google pedir.</li></ol>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">${tk?`<button class="btn" data-acao="bol-script" data-emp="${emp.id}">Copiar script</button><button class="btn ghost" data-acao="bol-novo-codigo" data-emp="${emp.id}">Trocar código</button>`:`<button class="btn" data-acao="bol-gerar" data-emp="${emp.id}">Gerar código e copiar script</button>`}<button class="btn ghost" data-acao="fechar">Fechar</button></div>
+  <textarea id="bolScript" rows="3" readonly hidden style="font-size:11px"></textarea>
+  <p class="muted small" style="margin:0">Trocar o código desliga o script antigo. Use se achar que alguém viu o código.</p>`);
+  document.getElementById('bolEmp').addEventListener('change',ev=>formBolConfig(ev.target.value));
+}
+async function copiarScript(empId){const tk=S.bolTokens.find(t=>t.empresa_id===empId);const txt=await scriptBoletos(tk.token);
+  try{await navigator.clipboard.writeText(txt);toast('Script copiado. Agora cole em script.google.com.')}catch(e){const t=document.getElementById('bolScript');t.hidden=false;t.value=txt;t.select();toast('Selecionei o script: copie e cole em script.google.com.')}}
+const ACOES_BOL={
+  'bol-config':()=>formBolConfig(),
+  async 'bol-gerar'(b){b.disabled=true;const {data,error}=await sb.from('boletos_email_token').upsert({empresa_id:b.dataset.emp},{onConflict:'empresa_id'}).select().single();if(error)throw error;
+    S.bolTokens=[...S.bolTokens.filter(t=>t.empresa_id!==data.empresa_id),data];formBolConfig(data.empresa_id);await copiarScript(data.empresa_id)},
+  async 'bol-novo-codigo'(b){if(!confirm('Trocar o código? O script que já está instalado para esta empresa para de funcionar até você colar o novo.'))return;
+    b.disabled=true;const {data,error}=await sb.from('boletos_email_token').update({token:uuid(),ultimo_uso:null}).eq('empresa_id',b.dataset.emp).select().single();if(error)throw error;
+    S.bolTokens=[...S.bolTokens.filter(t=>t.empresa_id!==data.empresa_id),data];formBolConfig(data.empresa_id);await copiarScript(data.empresa_id)},
+  async 'bol-script'(b){await copiarScript(b.dataset.emp)},
+  async 'bol-copiar'(b){const x=S.boletos.find(y=>y.id===b.dataset.id);try{await navigator.clipboard.writeText(x.linha_digitavel);toast('Linha digitável copiada.')}catch(e){toast(linhaFmt(x.linha_digitavel))}},
+  async 'bol-ignorar'(b){b.disabled=true;const {error}=await sb.from('boletos_email').update({status:'ignorado'}).eq('id',b.dataset.id);if(error)throw error;toast('Boleto ignorado.');render(true)},
+  async 'bol-voltar'(b){const {error}=await sb.from('boletos_email').update({status:'novo'}).eq('id',b.dataset.id);if(error)throw error;render(true)},
+  async 'bol-lancar'(b){const x=S.boletos.find(y=>y.id===b.dataset.id);if(!x)return;
+    // repete a conta e o centro de custo usados no último boleto do mesmo beneficiário
+    let conta=null,centro=null;const chave=x.documento_beneficiario?['documento_beneficiario',x.documento_beneficiario]:x.beneficiario?['beneficiario',x.beneficiario]:null;
+    if(chave){const {data}=await sb.from('boletos_email').select('lancamentos(conta_id,centro_custo_id)').eq('empresa_id',x.empresa_id).eq('status','lancado').eq(chave[0],chave[1]).not('lancamento_id','is',null).order('criado_em',{ascending:false}).limit(1);
+      const l=data?.[0]?.lancamentos;if(l){conta=l.conta_id;centro=l.centro_custo_id}}
+    formLanc(null,null,{boleto:x.id,empresa:x.empresa_id,valor:x.valor,vencimento:x.vencimento||HOJE,competencia:x.vencimento||HOJE,parceiro:x.beneficiario||'',documento:'Boleto',descricao:x.assunto||'',forma:'Boleto',conta,centro})},
+};
+
 // ===================== Lançamentos
 async function vLancamentos(){
   let ls=await lancDoPer();
@@ -658,28 +737,29 @@ function camposEmpresa(empId){
     cc:`<option value="">Sem centro de custo</option>${cc.map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}`,
     bancos:`<option value="">Não informar</option>${bs.map(b=>`<option value="${b.id}">${esc(bancoTxt(b))}</option>`).join('')}`};
 }
-function formLanc(L,PS){
-  const emp=L?empresa(L.empresa_id):(selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id)));if(!emp)return;
+function formLanc(L,PS,pre={}){
+  const emp=L?empresa(L.empresa_id):((pre.empresa&&S.empresas.find(e=>e.id===pre.empresa&&podeEditar(e.id)))||selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id)));if(!emp)return;
   const f=camposEmpresa(emp.id);const P1=PS?.length===1?PS[0]:null;
-  drawer(`<h3>${L?'Editar lançamento':'Novo lançamento'}</h3><p class="muted" style="margin:0">${L?'Altere o que precisar e salve. O sinal do valor segue o tipo da conta.':'Receita com valor positivo, despesa com valor negativo (o sinal é ajustado pela conta escolhida).'}</p>
+  drawer(`<h3>${L?'Editar lançamento':pre.boleto?'Lançar boleto como conta a pagar':'Novo lançamento'}</h3><p class="muted" style="margin:0">${pre.boleto?'Os dados vieram do boleto. Confira, escolha a conta do plano e salve.':L?'Altere o que precisar e salve. O sinal do valor segue o tipo da conta.':'Receita com valor positivo, despesa com valor negativo (o sinal é ajustado pela conta escolhida).'}</p>
   ${L&&L.origem&&L.origem!=='manual'?`<div class="effect">Este lançamento veio de ${L.origem==='faturamento'?'um faturamento':'uma importação'}. Lançamentos ligados a ele (taxa da maquininha, impostos) não mudam junto.</div>`:''}
-  <form data-form="${L?'lanc-edit':'lanc'}" data-id="${L?.id||''}" class="form-grid">
+  <form data-form="${L?'lanc-edit':'lanc'}" data-id="${L?.id||''}" class="form-grid">${pre.boleto?`<input type="hidden" name="boleto" value="${esc(pre.boleto)}">`:''}
     ${L?`<input type="hidden" name="empresa" value="${emp.id}"><div class="field wide"><label>Empresa</label><input value="${esc(nomeEmp(emp))}" readonly></div>`:`<div class="field wide"><label for="lEmp">Empresa</label><select id="lEmp" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>`}
     <div class="field"><label for="lPred">Prédio</label><select id="lPred" name="predio">${f.pred}</select></div>
-    <div class="field"><label for="lComp">Competência</label><input id="lComp" name="competencia" type="date" required value="${L?.competencia||HOJE}"></div>
-    <div class="field"><label for="lValor">Valor (R$)</label><input id="lValor" name="valor" required inputmode="decimal" placeholder="1.250,00" value="${L?fmtIn(L.valor):''}"></div>
+    <div class="field"><label for="lComp">Competência</label><input id="lComp" name="competencia" type="date" required value="${esc(L?.competencia||pre.competencia||HOJE)}"></div>
+    <div class="field"><label for="lValor">Valor (R$)</label><input id="lValor" name="valor" required inputmode="decimal" placeholder="1.250,00" value="${L?fmtIn(L.valor):pre.valor?fmtIn(Math.abs(pre.valor)):''}"></div>
     <div class="field wide"><label for="lConta">Conta do plano</label><select id="lConta" name="conta" required>${f.contas}</select></div>
     <div class="field"><label for="lCC">Centro de custo</label><select id="lCC" name="centro">${f.cc}</select></div>
-    <div class="field"><label for="lParc">Cliente / fornecedor</label><input id="lParc" name="parceiro" list="dlParc" autocomplete="off" value="${esc(L?parceiro(L.parceiro_id)?.nome||'':'')}"></div>
-    ${L?'':`<div class="field"><label for="lDoc">Documento</label><input id="lDoc" name="documento" placeholder="NF 123"></div>`}
-    <div class="field wide"><label for="lDesc">Descrição</label><input id="lDesc" name="descricao" value="${esc(L?.descricao||'')}"></div>
-    ${!L||P1?`<div class="field"><label for="lVenc">Vencimento</label><input id="lVenc" name="vencimento" type="date" value="${P1?.vencimento||HOJE}"></div>
+    <div class="field"><label for="lParc">Cliente / fornecedor</label><input id="lParc" name="parceiro" list="dlParc" autocomplete="off" value="${esc(L?parceiro(L.parceiro_id)?.nome||'':pre.parceiro||'')}"></div>
+    ${L?'':`<div class="field"><label for="lDoc">Documento</label><input id="lDoc" name="documento" placeholder="NF 123" value="${esc(pre.documento||'')}"></div>`}
+    <div class="field wide"><label for="lDesc">Descrição</label><input id="lDesc" name="descricao" value="${esc(L?.descricao||pre.descricao||'')}"></div>
+    ${!L||P1?`<div class="field"><label for="lVenc">Vencimento</label><input id="lVenc" name="vencimento" type="date" value="${esc(P1?.vencimento||pre.vencimento||HOJE)}"></div>
     <div class="field"><label for="lPag">Data do pagamento</label><input id="lPag" name="pagamento" type="date" value="${P1?.data_pagamento||''}"></div>
-    <div class="field"><label for="lForma">Forma de pagamento</label><input id="lForma" name="forma" placeholder="PIX, boleto…" value="${esc(P1?.forma_pagamento||'')}"></div>
+    <div class="field"><label for="lForma">Forma de pagamento</label><input id="lForma" name="forma" placeholder="PIX, boleto…" value="${esc(P1?.forma_pagamento||pre.forma||'')}"></div>
     <div class="field wide"><label for="lBanco">Conta bancária</label><select id="lBanco" name="banco">${f.bancos}</select></div>`:`<p class="muted wide" style="margin:0;font-size:12.5px">Este lançamento tem ${PS?.length||0} parcelas. Se o valor mudar, as parcelas em aberto são ajustadas na mesma proporção; as já pagas ficam como estão.</p>`}
     <datalist id="dlParc">${S.parceiros.filter(p=>p.empresa_id===emp.id).map(p=>`<option value="${esc(p.nome)}">`).join('')}</datalist>
-    <div class="wide" style="display:flex;gap:8px"><button class="btn">${L?'Salvar alterações':'Salvar lançamento'}</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">${L?'Salvar alterações':pre.boleto?'Lançar conta a pagar':'Salvar lançamento'}</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
   if(L){const fm=document.querySelector('form[data-form=lanc-edit]');fm.conta.value=L.conta_id;fm.predio.value=L.predio_id||'';fm.centro.value=L.centro_custo_id||'';if(fm.banco)fm.banco.value=P1?.conta_bancaria_id||''}
+  if(!L){const fm=document.querySelector('form[data-form=lanc]');if(pre.conta&&fm)fm.conta.value=pre.conta;if(pre.centro&&fm)fm.centro.value=pre.centro}
 }
 function trocaEmpForm(sel){const f=camposEmpresa(sel.value),fm=sel.form;
   if(fm.predio)fm.predio.innerHTML=f.pred;if(fm.conta)fm.conta.innerHTML=fm.dataset.form==='fat'?S.contas.filter(c=>c.empresa_id===sel.value&&c.analitica&&c.ativa&&c.grupo_dre==='receita_bruta').map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join(''):f.contas;if(fm.centro)fm.centro.innerHTML=f.cc;if(fm.banco)fm.banco.innerHTML=f.bancos;
@@ -1965,14 +2045,14 @@ document.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&['salBruto','salDe
 <script>
 // ===================== navegação e filtros
 const ROTAS=[
- ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['lancamentos','Lançamentos'],
+ ['g','Visão geral'],['painel','Painel'],['dre','DRE'],['faturamento','Faturamento e impostos'],['fluxo','Fluxo de caixa'],['contas','Contas a pagar e receber'],['boletos','Boletos do e-mail'],['lancamentos','Lançamentos'],
  ['g','Controle'],['auditoria','Auditoria de extratos',1],['nfs','Notas fiscais',1],['estoque','Estoque',1],
  ['g','Planejamento'],['orcamento','Orçamento e forecast'],['premissas','Premissas de prazo'],['salario','Salário líquido (PF)'],
  ['g','Cadastros'],['plano','Plano de contas'],['empresas','Empresas e prédios'],['bancos','Contas bancárias'],['tributos','Impostos e maquininha'],['importar','Importar dados antigos'],['usuarios','Usuários',0,1],
 ];
 const TITULOS=Object.fromEntries(ROTAS.filter(r=>r[0]!=='g'));
-const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario};
-const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','faturamento']);
+const VIEWS={painel:vPainel,dre:vDRE,fluxo:vFluxo,contas:vContas,boletos:vBoletos,lancamentos:vLancamentos,plano:vPlano,empresas:vEmpresas,importar:vImportar,usuarios:vUsuarios,faturamento:vFaturamento,tributos:vTributos,orcamento:vOrcamento,premissas:vPremissas,bancos:vBancos,salario:vSalario};
+const USA_PERIODO=new Set(['painel','dre','lancamentos','faturamento']),USA_ANO=new Set(['painel','dre','lancamentos','fluxo','faturamento']),USA_EMP=new Set(['painel','dre','lancamentos','fluxo','contas','boletos','faturamento']);
 function rota(){const h=location.hash.slice(1);return TITULOS[h]&&!(h==='usuarios'&&!S.master)?h:'painel'}
 function renderNav(r){
   document.getElementById('nav').innerHTML=ROTAS.filter(x=>!x[3]||S.master).map(([id,n,soon])=>id==='g'?`<div class="nav-group">${n}</div>`:`<a href="#${id}" class="${id===r?'on':''}"><span class="nl">${icone(id)}<span>${n}</span></span>${soon?'<span class="soon">em breve</span>':''}</a>`).join('');
@@ -2100,6 +2180,7 @@ const FORMS={
     const P={empresa_id:emp,lancamento_id:id,numero:1,vencimento:f.vencimento.value||pago||f.competencia.value,valor:v,data_pagamento:pago||null,valor_pago:pago?v:null,forma_pagamento:f.forma.value.trim()||null,status:pago?'paga':'aberta',conta_bancaria_id:f.banco.value||null,centro_custo_id:f.centro.value||null};
     const {error:e2}=await sb.from('parcelas').insert(P);
     if(e2)throw e2;
+    if(f.boleto){const {error:e3}=await sb.from('boletos_email').update({status:'lancado',lancamento_id:id}).eq('id',f.boleto.value);if(e3)throw e3;invalidar();await carregarAnos();fecharDrawer();toast('Boleto lançado em contas a pagar.');render();return}
     invalidar();await carregarAnos();render();perguntarReplicar(L,P)},
   async baixa(f){const ab=await S.parcAbertas;const p=ab.find(x=>x.id===f.dataset.id);let v=parseValor(f.valor.value);if(isNaN(v)||!v)return toast('Informe o valor pago.');
     const {error}=await sb.from('parcelas').update({status:'paga',data_pagamento:f.data.value,valor_pago:r2(Math.abs(v)*Math.sign(p.valor)),conta_bancaria_id:f.banco.value||null,forma_pagamento:f.forma.value.trim()||null}).eq('id',p.id);
@@ -2180,6 +2261,7 @@ document.addEventListener('click',async ev=>{
   else if(a==='alterar-senha')drawer(`<h3>Alterar senha</h3><form data-form="senha-nova" class="form-grid"><div class="field wide"><label for="nS1">Nova senha (mínimo 8 caracteres)</label><input id="nS1" name="senha" type="password" minlength="8" autocomplete="new-password" required></div><div class="field wide"><label for="nS2">Repita a senha</label><input id="nS2" name="senha2" type="password" minlength="8" autocomplete="new-password" required></div><div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
   else if(a==='novo-lanc')formLanc();
   else if(a==='baixar')formBaixa(b.dataset.id);
+  else if(ACOES_BOL[a])await ACOES_BOL[a](b);
   else if(a==='excluir-lanc'){if(!confirm('Excluir este lançamento e suas parcelas?'))return;const {error}=await sb.from('lancamentos').delete().eq('id',b.dataset.id);if(error)throw error;invalidar();fecharDrawer();toast('Lançamento excluído.');render()}
   else if(a==='nova-conta')formConta();
   else if(formsCad[a])drawer(formsCad[a](b.dataset.emp));
