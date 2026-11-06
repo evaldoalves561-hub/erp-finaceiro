@@ -658,26 +658,28 @@ function camposEmpresa(empId){
     cc:`<option value="">Sem centro de custo</option>${cc.map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}`,
     bancos:`<option value="">Não informar</option>${bs.map(b=>`<option value="${b.id}">${esc(bancoTxt(b))}</option>`).join('')}`};
 }
-function formLanc(){
-  const emp=selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id));if(!emp)return;
-  const f=camposEmpresa(emp.id);
-  drawer(`<h3>Novo lançamento</h3><p class="muted" style="margin:0">Receita com valor positivo, despesa com valor negativo (o sinal é ajustado pela conta escolhida).</p>
-  <form data-form="lanc" class="form-grid">
-    <div class="field wide"><label for="lEmp">Empresa</label><select id="lEmp" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>
+function formLanc(L,PS){
+  const emp=L?empresa(L.empresa_id):(selEmp().find(e=>podeEditar(e.id))||S.empresas.find(e=>podeEditar(e.id)));if(!emp)return;
+  const f=camposEmpresa(emp.id);const P1=PS?.length===1?PS[0]:null;
+  drawer(`<h3>${L?'Editar lançamento':'Novo lançamento'}</h3><p class="muted" style="margin:0">${L?'Altere o que precisar e salve. O sinal do valor segue o tipo da conta.':'Receita com valor positivo, despesa com valor negativo (o sinal é ajustado pela conta escolhida).'}</p>
+  ${L&&L.origem&&L.origem!=='manual'?`<div class="effect">Este lançamento veio de ${L.origem==='faturamento'?'um faturamento':'uma importação'}. Lançamentos ligados a ele (taxa da maquininha, impostos) não mudam junto.</div>`:''}
+  <form data-form="${L?'lanc-edit':'lanc'}" data-id="${L?.id||''}" class="form-grid">
+    ${L?`<input type="hidden" name="empresa" value="${emp.id}"><div class="field wide"><label>Empresa</label><input value="${esc(nomeEmp(emp))}" readonly></div>`:`<div class="field wide"><label for="lEmp">Empresa</label><select id="lEmp" name="empresa" data-troca-emp>${opcoesEmp(emp.id)}</select></div>`}
     <div class="field"><label for="lPred">Prédio</label><select id="lPred" name="predio">${f.pred}</select></div>
-    <div class="field"><label for="lComp">Competência</label><input id="lComp" name="competencia" type="date" required value="${HOJE}"></div>
-    <div class="field"><label for="lValor">Valor (R$)</label><input id="lValor" name="valor" required inputmode="decimal" placeholder="1.250,00"></div>
+    <div class="field"><label for="lComp">Competência</label><input id="lComp" name="competencia" type="date" required value="${L?.competencia||HOJE}"></div>
+    <div class="field"><label for="lValor">Valor (R$)</label><input id="lValor" name="valor" required inputmode="decimal" placeholder="1.250,00" value="${L?fmtIn(L.valor):''}"></div>
     <div class="field wide"><label for="lConta">Conta do plano</label><select id="lConta" name="conta" required>${f.contas}</select></div>
     <div class="field"><label for="lCC">Centro de custo</label><select id="lCC" name="centro">${f.cc}</select></div>
-    <div class="field"><label for="lParc">Cliente / fornecedor</label><input id="lParc" name="parceiro" list="dlParc" autocomplete="off"></div>
-    <div class="field"><label for="lDoc">Documento</label><input id="lDoc" name="documento" placeholder="NF 123"></div>
-    <div class="field wide"><label for="lDesc">Descrição</label><input id="lDesc" name="descricao"></div>
-    <div class="field"><label for="lVenc">Vencimento</label><input id="lVenc" name="vencimento" type="date" value="${HOJE}"></div>
-    <div class="field"><label for="lPag">Data do pagamento</label><input id="lPag" name="pagamento" type="date"></div>
-    <div class="field"><label for="lForma">Forma de pagamento</label><input id="lForma" name="forma" placeholder="PIX, boleto…"></div>
-    <div class="field wide"><label for="lBanco">Conta bancária</label><select id="lBanco" name="banco">${f.bancos}</select></div>
+    <div class="field"><label for="lParc">Cliente / fornecedor</label><input id="lParc" name="parceiro" list="dlParc" autocomplete="off" value="${esc(L?parceiro(L.parceiro_id)?.nome||'':'')}"></div>
+    ${L?'':`<div class="field"><label for="lDoc">Documento</label><input id="lDoc" name="documento" placeholder="NF 123"></div>`}
+    <div class="field wide"><label for="lDesc">Descrição</label><input id="lDesc" name="descricao" value="${esc(L?.descricao||'')}"></div>
+    ${!L||P1?`<div class="field"><label for="lVenc">Vencimento</label><input id="lVenc" name="vencimento" type="date" value="${P1?.vencimento||HOJE}"></div>
+    <div class="field"><label for="lPag">Data do pagamento</label><input id="lPag" name="pagamento" type="date" value="${P1?.data_pagamento||''}"></div>
+    <div class="field"><label for="lForma">Forma de pagamento</label><input id="lForma" name="forma" placeholder="PIX, boleto…" value="${esc(P1?.forma_pagamento||'')}"></div>
+    <div class="field wide"><label for="lBanco">Conta bancária</label><select id="lBanco" name="banco">${f.bancos}</select></div>`:`<p class="muted wide" style="margin:0;font-size:12.5px">Este lançamento tem ${PS?.length||0} parcelas. Se o valor mudar, as parcelas em aberto são ajustadas na mesma proporção; as já pagas ficam como estão.</p>`}
     <datalist id="dlParc">${S.parceiros.filter(p=>p.empresa_id===emp.id).map(p=>`<option value="${esc(p.nome)}">`).join('')}</datalist>
-    <div class="wide" style="display:flex;gap:8px"><button class="btn">Salvar lançamento</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+    <div class="wide" style="display:flex;gap:8px"><button class="btn">${L?'Salvar alterações':'Salvar lançamento'}</button><button type="button" class="btn ghost" data-acao="fechar">Cancelar</button></div></form>`);
+  if(L){const fm=document.querySelector('form[data-form=lanc-edit]');fm.conta.value=L.conta_id;fm.predio.value=L.predio_id||'';fm.centro.value=L.centro_custo_id||'';if(fm.banco)fm.banco.value=P1?.conta_bancaria_id||''}
 }
 function trocaEmpForm(sel){const f=camposEmpresa(sel.value),fm=sel.form;
   if(fm.predio)fm.predio.innerHTML=f.pred;if(fm.conta)fm.conta.innerHTML=fm.dataset.form==='fat'?S.contas.filter(c=>c.empresa_id===sel.value&&c.analitica&&c.ativa&&c.grupo_dre==='receita_bruta').map(c=>`<option value="${c.id}">${esc(c.codigo)} ${esc(c.nome)}</option>`).join(''):f.contas;if(fm.centro)fm.centro.innerHTML=f.cc;if(fm.banco)fm.banco.innerHTML=f.bancos;
@@ -686,13 +688,13 @@ function trocaEmpForm(sel){const f=camposEmpresa(sel.value),fm=sel.form;
 async function abrirLanc(id){
   const ls=await lancAno(S.ano);const l=ls.find(x=>x.id===id);if(!l)return;
   const {data:ps}=await sb.from('parcelas').select('*').eq('lancamento_id',id).order('numero');
-  const c=conta(l.conta_id);
+  const c=conta(l.conta_id);S._lancAberto={l,ps:ps||[]};
   drawer(`<h3>${esc(l.descricao||c?.nome||'Lançamento')}</h3>
   <div class="kv"><div><small>Competência</small><span>${dataBR(l.competencia)}</span></div><div><small>Valor</small><span>${brl2.format(l.valor)}</span></div><div><small>Conta</small><span>${esc(c?.codigo)} ${esc(c?.nome)}</span></div>
   <div><small>Empresa</small><span>${esc(nomeEmp(empresa(l.empresa_id)))}</span></div><div><small>Prédio</small><span>${esc(predio(l.predio_id)?.nome||'–')}</span></div><div><small>Centro de custo</small><span>${esc(centro(l.centro_custo_id)?.nome||'–')}</span></div>
   <div><small>Parceiro</small><span>${esc(parceiro(l.parceiro_id)?.nome||'–')}</span></div></div>
   <div><h2 style="font-size:14px;margin:0 0 6px">Parcelas</h2>${ps?.length?`<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vencimento</th><th>Situação</th><th>Pago em</th><th class="n">Valor</th><th>Conta bancária</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${p.numero}</td><td class="mono">${dataBR(p.vencimento)}</td><td>${p.status==='paga'?'<span class="chip good">Paga</span>':p.status==='cancelada'?'<span class="chip mute">Cancelada</span>':`<span class="chip ${statusParcela(p)[1]}">${statusParcela(p)[0]}</span>`}</td><td class="mono">${dataBR(p.data_pagamento)}</td><td class="n">${brl2.format(p.valor_pago??p.valor)}</td><td>${esc(bancoTxt(banco(p.conta_bancaria_id)))}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted" style="margin:0">Sem parcelas.</p>'}</div>
-  ${podeEditar(l.empresa_id)?`<div style="display:flex;gap:8px"><button class="btn ghost" data-acao="excluir-lanc" data-id="${l.id}" style="color:var(--bad)">Excluir lançamento</button></div>`:''}`);
+  ${podeEditar(l.empresa_id)?`<div style="display:flex;gap:8px"><button class="btn" data-acao="editar-lanc">Editar lançamento</button><button class="btn ghost" data-acao="excluir-lanc" data-id="${l.id}" style="color:var(--bad)">Excluir lançamento</button></div>`:''}`);
 }
 
 // ===================== Plano de contas
@@ -1930,11 +1932,25 @@ const FORMS_PF={
     await lotes('orcamento_linhas',Object.entries(M).map(([k_,x])=>{const [c,m]=k_.split('|');return {empresa_id:emp,versao_id:v.id,conta_id:c,predio_id:null,competencia:ym(v.ano,+m)+'-01',valor:x}}));
     await linhasDe(v.id,true);S.orcEmp=emp;S.orcVer=v.id;S.orcEdit=null;toast(`Projeção lançada em “${v.nome}”.`);render(true)},
 };
+FORMS_PF['lanc-edit']=async f=>{const A=S._lancAberto;if(!A||A.l.id!==f.dataset.id)return;const old=A.l;
+  const emp=old.empresa_id,c=conta(f.conta.value);let v=parseValor(f.valor.value);
+  if(!c)return toast('Escolha a conta do plano.');if(isNaN(v)||!v)return toast('Informe um valor válido.');
+  v=r2(Math.abs(v)*(c.tipo==='receita'?1:-1));
+  let parcId=null;const pn=f.parceiro.value.trim();
+  if(pn){const p=S.parceiros.find(x=>x.empresa_id===emp&&norm(x.nome)===norm(pn));if(p)parcId=p.id;else{const {data,error}=await sb.from('parceiros').insert({empresa_id:emp,nome:pn,cliente:v>0,fornecedor:v<0}).select('id,empresa_id,documento,nome').single();if(error)throw error;S.parceiros.push(data);parcId=data.id}}
+  const {error}=await sb.from('lancamentos').update({conta_id:c.id,predio_id:f.predio.value||null,centro_custo_id:f.centro.value||null,parceiro_id:parcId,competencia:f.competencia.value,descricao:f.descricao.value.trim()||null,valor:v}).eq('id',old.id);if(error)throw error;
+  const ps=A.ps;
+  if(ps.length===1&&f.vencimento){const p=ps[0],pago=f.pagamento.value;
+    const {error:e2}=await sb.from('parcelas').update({vencimento:f.vencimento.value||pago||f.competencia.value,valor:v,data_pagamento:pago||null,valor_pago:pago?(p.status==='paga'&&p.valor_pago!=null&&p.valor===v?p.valor_pago:v):null,forma_pagamento:f.forma.value.trim()||null,status:pago?'paga':(p.status==='cancelada'?'cancelada':'aberta'),conta_bancaria_id:f.banco.value||null,centro_custo_id:f.centro.value||null}).eq('id',p.id);if(e2)throw e2}
+  else if(ps.length>1&&v!==+old.valor){const pagas=sum(ps.filter(p=>p.status==='paga').map(p=>p.valor)),ab=ps.filter(p=>p.status==='aberta'),totAb=sum(ab.map(p=>p.valor));const resto=r2(v-pagas);
+    if(ab.length&&totAb){let acc=0;for(let i=0;i<ab.length;i++){const nv=i<ab.length-1?r2(ab[i].valor/totAb*resto):r2(resto-acc);acc=r2(acc+nv);const {error:e3}=await sb.from('parcelas').update({valor:nv,centro_custo_id:f.centro.value||null}).eq('id',ab[i].id);if(e3)throw e3}}}
+  S._lancAberto=null;invalidar();await carregarAnos();fecharDrawer();toast('Lançamento atualizado.');render()};
 const ACOES_PF={
   'nova-conta-banc':()=>formBanco(),
   'editar-banco':b=>formBanco(b.dataset.id),
   'novo-banco':b=>formBanco(null,b.dataset.emp),
   'sal-calcular':()=>{lerSal();render(true)},
+  'editar-lanc':()=>{const A=S._lancAberto;if(A)formLanc(A.l,A.ps)},
 };
 function lerSal(){const s=stSal();const g=id=>document.getElementById(id);if(g('salBruto')){const b=parseValor(g('salBruto').value);s.bruto=isNaN(b)?0:Math.max(0,b);s.dep=Math.max(0,parseInt(g('salDep').value)||0);const o=parseValor(g('salOutros').value);s.outros=isNaN(o)?0:Math.max(0,o)}}
 document.addEventListener('change',ev=>{const t=ev.target;
