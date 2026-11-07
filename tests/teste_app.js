@@ -33,12 +33,12 @@ colabs[0].ferias_quitadas_ate='2025-03-14';colabs[2].ferias_quitadas_ate='2024-0
 colabs.push({id:id(),empresa_id:empresas[0].id,departamento_id:deps[2].id,predio_id:predios[0].id,nome:'João Saiu',cargo:'Vendedor',admissao:'2022-05-01',desligamento:'2026-04-30',salario:2500,contrato:'clt'});
 const aus=[[0,'ferias','2026-01-05','2026-01-24'],[1,'atestado','2026-03-10','2026-03-12'],[2,'ferias','2026-11-03','2026-11-17'],[4,'atestado','2026-11-04','2026-11-05'],[3,'falta','2026-10-14','2026-10-14'],[5,'afastamento','2026-06-01','2026-07-15'],[1,'ferias','2025-12-01','2025-12-20']].map(([ci,t,i,f])=>({id:id(),empresa_id:colabs[ci].empresa_id,colaborador_id:colabs[ci].id,tipo:t,inicio:i,fim:f,dias:Math.round((new Date(f)-new Date(i))/864e5)+1,abono_dias:0,status:'aprovada'}));
 const novaEmp=[],semPar=[];
-const DB={alcadas:[],aprovacoes:[],pagamento_lotes:[],compras_pedidos:[],compras_cotacoes:[],boletos_email:boletos,boletos_email_token:[],extratos:[],extrato_linhas:[],regras_classificacao:[],departamentos:deps,colaboradores:colabs,ausencias:aus,acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
+const DB={app_config:[],app_config_hist:[],alcadas:[],aprovacoes:[],pagamento_lotes:[],compras_pedidos:[],compras_cotacoes:[],boletos_email:boletos,boletos_email_token:[],extratos:[],extrato_linhas:[],regras_classificacao:[],departamentos:deps,colaboradores:colabs,ausencias:aus,acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
 const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]},{usuario_id:id(),email:'rita@exemplo.com',nome:'Rita Lopes',master:false,ativo:true,ultimo_acesso:'2026-11-02T10:00:00Z',convite_aceito:true,outras_empresas:1,acessos:[{empresa_id:empresas[0].id,papel:'rh',departamento_id:deps[0].id,predios:[]}],empresas:[empresas[0].id],papel:'rh',predios:[]}];
 // ---------- PostgREST falso
 function filtrar(rows,q){
   for(const [k,v] of q){if(['select','order','limit','offset'].includes(k))continue;const [op,...r]=v.split('.');const val=r.join('.');
-    rows=rows.filter(x=>{const a=x[k];if(op==='eq')return String(a)===val;if(op==='gte')return a!=null&&a>=val;if(op==='lte')return a!=null&&a<=val;if(op==='is')return a==null;if(op==='in')return val.replace(/^\(|\)$/g,'').split(',').map(x=>x.replace(/^"|"$/g,'')).includes(String(a));return true})}
+    rows=rows.filter(x=>{const a=x[k];if(op==='eq')return String(a)===val;if(op==='gte')return a!=null&&a>=val;if(op==='lte')return a!=null&&a<=val;if(op==='lt')return a!=null&&a<val;if(op==='is')return a==null;if(op==='in')return val.replace(/^\(|\)$/g,'').split(',').map(x=>x.replace(/^"|"$/g,'')).includes(String(a));return true})}
   const o=q.get('order');if(o){const [c,d]=o.split('.');rows=rows.slice().sort((x,y)=>String(x[c]).localeCompare(String(y[c]))*(d==='desc'?-1:1))}
   const l=q.get('limit');if(l)rows=rows.slice(0,+l);return rows}
 function embutir(t,rows,sel){if(t==='parcelas'&&/lancamentos\(/.test(sel))return rows.map(p=>{const l=lanc.find(x=>x.id===p.lancamento_id);return {...p,lancamentos:l?{predio_id:l.predio_id,descricao:l.descricao,conta_id:l.conta_id,parceiro_id:l.parceiro_id,centro_custo_id:l.centro_custo_id,competencia:l.competencia}:null}});return rows}
@@ -137,6 +137,44 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.evaluate(()=>location.hash='aprovacoes');await pg.waitForTimeout(900);await shot(pg,'aprovacoes');
     await pg.click('[data-apr=aprovar]');await pg.waitForTimeout(700);if(DB.pagamento_lotes[0].status!=='aprovado')errs.push('aprovação do lote');
     await pg.click('[data-apr=nova]');await pg.waitForTimeout(200);await shot(pg,'alcada-form');await pg.click('[data-acao=fechar]');
+    // administração do sistema
+    pg.on('dialog',d=>d.accept());
+    await pg.evaluate(()=>location.hash='admin');await pg.waitForTimeout(1500);await shot(pg,'admin-saude');
+    await pg.click('[data-admtab=parametros]');await pg.waitForTimeout(600);await pg.fill('#admAviso','Fechamento de outubro até dia 5. Lance todas as notas até lá.');await pg.check('input[name=ativo]');await pg.fill('#admWhats','62999998888');await shot(pg,'admin-param');
+    await pg.click('form[data-form=adm-param] button');await pg.waitForTimeout(1000);
+    if(!DB.app_config.some(r=>r.chave==='app.aviso'&&r.valor.ativo))errs.push('aviso não salvou');
+    if(!await pg.$('#avisoGeral'))errs.push('aviso não aparece na tela');
+    await pg.click('[data-admtab=telas]');await pg.waitForTimeout(500);await pg.uncheck('input[name=ver_salario]');await pg.fill('input[name=rot_contas]','Contas a pagar');await shot(pg,'admin-telas');
+    await pg.click('form[data-form=adm-telas] button');await pg.waitForTimeout(1000);
+    if(!DB.app_config.some(r=>r.chave==='app.telas_ocultas'&&r.valor.includes('salario')))errs.push('telas ocultas não salvaram');
+    if(!(await pg.textContent('#nav')).includes('Contas a pagar'))errs.push('novo nome da tela não apareceu no menu');
+    await pg.click('[data-admtab=dados]');await pg.waitForTimeout(400);await pg.click('[data-acao=adm-verificar]');await pg.waitForTimeout(2000);await shot(pg,'admin-dados');
+    await pg.click('[data-admtab=historico]');await pg.waitForTimeout(500);await shot(pg,'admin-historico');
+    // boletos: tela nova
+    {const tk=DB.boletos_email_token[0];tk.ultima_execucao=new Date(Date.now()-12*6e4).toISOString();tk.ultimo_resumo={versao:3,conversas:42,mensagens:61,novos:2,sem_linha:1,links:1,erros:[]};tk.config={};
+     const e0=empresas[0].id;const pAb=parc.find(x=>x.empresa_id===e0&&x.status==='aberta'&&x.valor<0);
+     parceiros.push({id:id(),empresa_id:e0,documento:'50565317000143',nome:'IPASGO Saúde'});
+     const b1={id:id(),empresa_id:e0,chave:'e',status:'novo',remetente:'IPASGO <boleto@ipasgo.go.gov.br>',assunto:'Boleto novembro',recebido_em:'2026-11-05T09:00:00Z',linha_digitavel:'75691500430144950471912093660012616270000038384',valor:383.84,vencimento:'2026-11-11',beneficiario:'SERV. SOC. AUT. IPASGO SAUDE',documento_beneficiario:'50565317000143',criado_em:'2026-11-05T10:00:00Z'};
+     const b2={...b1,id:id(),chave:'f',linha_digitavel:'75691500430144950471912093800014716270000037973',valor:379.73,assunto:'Boleto dependente'};
+     const b3={id:id(),empresa_id:e0,chave:'g',status:'novo',remetente:'Condomínio <cobranca@condominio.com>',assunto:'Boleto condomínio',recebido_em:'2026-11-06T09:00:00Z',valor:Math.abs(pAb.valor),vencimento:pAb.vencimento,beneficiario:'Condomínio Mar Azul',criado_em:'2026-11-06T10:00:00Z'};
+     const b4={id:id(),empresa_id:e0,chave:'h',status:'novo',remetente:'Loja Y <ofertas@lojay.com>',assunto:'Sua 2ª via de boleto',recebido_em:'2026-11-06T09:00:00Z',link:'https://lojay.com/boleto/9',observacao:'O boleto veio em link. Abra o link para pegar a linha digitável.',criado_em:'2026-11-06T10:00:00Z'};
+     if(!DB.boletos_email_token.some(t=>t.empresa_id===e0))DB.boletos_email_token.push({empresa_id:e0,token:id(),criado_em:'2026-11-06T00:00:00Z',ultimo_uso:null,ultima_execucao:new Date(Date.now()-9*36e5).toISOString(),ultimo_resumo:{versao:2,conversas:40,mensagens:3,novos:0,erros:[]},config:{}});
+     boletos.push(b1,b2,b3,b4);
+     await pg.evaluate(()=>location.hash='contas');await pg.waitForTimeout(600);await pg.evaluate(()=>location.hash='boletos');await pg.waitForTimeout(1500);await shot(pg,'boletos-v2');
+     if(!(await pg.textContent('#view')).includes('Parece já lançado'))errs.push('não avisou boleto já lançado');
+     await pg.check(`[data-bolsel="${b1.id}"]`);await pg.waitForTimeout(500);await pg.check(`[data-bolsel="${b2.id}"]`);await pg.waitForTimeout(500);await shot(pg,'boletos-selecao');
+     await pg.click('[data-acao=bx-lote]');await pg.waitForTimeout(400);await pg.selectOption('#bxConta',{index:8});await shot(pg,'boletos-lote');
+     const nl=lanc.length;await pg.click('form[data-form=bx-lote] button:not([type=button])');await pg.waitForTimeout(1500);
+     if(b1.status!=='lancado'||b2.status!=='lancado'||lanc.length!==nl+2)errs.push('lote de boletos: '+b1.status+' '+b2.status+' '+(lanc.length-nl));
+     if(!lanc.slice(-2).every(l=>l.parceiro_id===parceiros.at(-1).id))errs.push('lote não usou o fornecedor pelo CNPJ');
+     await pg.click(`[data-acao=bx-vincular][data-id="${b3.id}"]`);await pg.waitForTimeout(900);if(b3.status!=='lancado'||b3.lancamento_id!==pAb.lancamento_id)errs.push('vincular ao lançamento existente');
+     await pg.click(`[data-acao=bx-ignorar][data-id="${b4.id}"]`);await pg.waitForTimeout(300);await shot(pg,'boletos-ignorar');await pg.click('[data-acao=bx-ign-sempre]');await pg.waitForTimeout(900);
+     if(b4.status!=='ignorado'||!(DB.boletos_email_token.find(t=>t.empresa_id===e0).config.ignorar_remetentes||[]).includes('ofertas@lojay.com'))errs.push('ignorar remetente sempre');
+     await pg.click('[data-bolf=lancado]');await pg.waitForTimeout(400);await shot(pg,'boletos-lancados');await pg.click('[data-bolf=novo]');await pg.waitForTimeout(300);
+     await pg.click('[data-acao=bol-config]');await pg.waitForTimeout(300);await pg.fill('#bxSempre','ipasgo.go.gov.br');await shot(pg,'boletos-ajustes');await pg.click('form[data-form=bx-config] button:not([type=button])');await pg.waitForTimeout(800);
+     if(!(tk.config.sempre_remetentes||[]).includes('ipasgo.go.gov.br'))errs.push('ajustes da busca não salvaram');await pg.click('[data-acao=fechar]');
+     await pg.click('[data-acao=bx-colar]');await pg.waitForTimeout(300);await pg.fill('#bxLinha','75691.50043 01449.504719 12093.660012 6 16270000038384');await pg.waitForTimeout(200);await shot(pg,'boletos-colar');
+     await pg.click('form[data-form=bx-colar] button:not([type=button])');await pg.waitForTimeout(500);if((await pg.inputValue('#lValor')).replace(/\D/g,'')!=='38384')errs.push('colar linha: valor '+await pg.inputValue('#lValor'));await pg.click('[data-acao=fechar]');}
     // menu recolhido
     await pg.click('#btnRecolhe');await pg.waitForTimeout(300);await shot(pg,'menu-recolhido');await pg.click('#btnRecolhe');
     // faturamento

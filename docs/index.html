@@ -302,7 +302,7 @@ table.mapa i{display:block;height:16px;border-radius:3px;cursor:pointer}
 <script src="vendor/xlsx.full.min.js"></script>
 <script>
 // ===================== Marca e ícones (traço, estilo de linha)
-const APP_NOME='Gevans Gestor',APP_SUB='Gevans Soluções';
+let APP_NOME='Gevans Gestor',APP_SUB='Gevans Soluções';
 const LOGO=`<svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M22.5 11.2A8 8 0 1 0 24 16h-7.5" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/><circle cx="23.6" cy="9.4" r="1.9" fill="#F2B544"/></svg>`;
 const IC={
  painel:'<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
@@ -2977,4 +2977,6 @@ function mostrarLink(email,link,novo){drawer(`<h3>Link de acesso · ${esc(email)
 <script src="cadastro.js"></script>
 <script src="compras.js"></script>
 <script src="aprovacoes.js"></script>
+<script src="boletos.js"></script>
+<script src="admin.js"></script>
 </body></html>
