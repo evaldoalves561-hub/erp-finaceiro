@@ -27,12 +27,18 @@ const boletos=[{id:id(),empresa_id:empresas[0].id,chave:'a',status:'novo',remete
  {id:id(),empresa_id:empresas[0].id,chave:'b',status:'novo',remetente:'Sabesp <conta@sabesp.com.br>',assunto:'Conta de água · outubro',recebido_em:'2026-10-28T09:00:00Z',linha_digitavel:'836200000011599000480107053120261123000000000005',valor:159.9,vencimento:'2026-11-01',beneficiario:'Sabesp',criado_em:'2026-10-28T10:00:00Z'},
  {id:id(),empresa_id:empresas[0].id,chave:'c',status:'novo',remetente:'Escola Aprender <financeiro@aprender.com>',assunto:'Boleto mensalidade novembro',recebido_em:'2026-11-04T09:00:00Z',linha_digitavel:null,valor:null,vencimento:null,observacao:'Não consegui ler o PDF (pode ter senha). Confira o anexo no e-mail.',criado_em:'2026-11-04T10:00:00Z'},
  {id:id(),empresa_id:empresas[0].id,chave:'d',status:'ignorado',remetente:'Loja X',assunto:'Boleto de exemplo',valor:89,vencimento:'2026-10-15',criado_em:'2026-10-10T10:00:00Z'}];
-const DB={boletos_email:boletos,boletos_email_token:[],acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[],extratos:[],extrato_linhas:[],regras_classificacao:[]};
-const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]}];
+const deps=[['Financeiro',0],['Operação',0],['Comercial',0],['Administração',1]].map(([n,ei])=>({id:id(),empresa_id:empresas[ei].id,nome:n,ativo:true,responsavel:null,centro_custo_id:null}));
+const colabs=[['Carla Mendes','Analista financeira',0,0,'2021-03-15',5200,'1990-11-12'],['Diego Ramos','Barista',1,0,'2024-08-01',2300,'1998-04-02'],['Elisa Prado','Gerente de loja',1,1,'2019-06-10',6800,null],['Fábio Lima','Vendedor',2,0,'2025-09-20',2600,null],['Gabi Torres','Atendente',1,1,'2023-01-09',2100,'2001-11-30'],['Hugo Alves','Zelador',3,2,'2022-02-01',2400,null],['Iris Nunes','Auxiliar',1,0,'2026-09-01',2000,null]].map(([n,c,d,pi,adm,sal,nasc])=>({id:id(),empresa_id:predios[pi].empresa_id,departamento_id:deps[d].id,predio_id:predios[pi].id,nome:n,cargo:c,admissao:adm,salario:sal,nascimento:nasc,contrato:'clt',desligamento:null}));
+colabs[0].ferias_quitadas_ate='2025-03-14';colabs[2].ferias_quitadas_ate='2024-06-09';colabs[4].ferias_quitadas_ate='2025-01-08';
+colabs.push({id:id(),empresa_id:empresas[0].id,departamento_id:deps[2].id,predio_id:predios[0].id,nome:'João Saiu',cargo:'Vendedor',admissao:'2022-05-01',desligamento:'2026-04-30',salario:2500,contrato:'clt'});
+const aus=[[0,'ferias','2026-01-05','2026-01-24'],[1,'atestado','2026-03-10','2026-03-12'],[2,'ferias','2026-11-03','2026-11-17'],[4,'atestado','2026-11-04','2026-11-05'],[3,'falta','2026-10-14','2026-10-14'],[5,'afastamento','2026-06-01','2026-07-15'],[1,'ferias','2025-12-01','2025-12-20']].map(([ci,t,i,f])=>({id:id(),empresa_id:colabs[ci].empresa_id,colaborador_id:colabs[ci].id,tipo:t,inicio:i,fim:f,dias:Math.round((new Date(f)-new Date(i))/864e5)+1,abono_dias:0,status:'aprovada'}));
+const novaEmp=[],semPar=[];
+const DB={app_config:[],app_config_hist:[],alcadas:[],aprovacoes:[],pagamento_lotes:[],compras_pedidos:[],compras_cotacoes:[],boletos_email:boletos,boletos_email_token:[],extratos:[],extrato_linhas:[],regras_classificacao:[],departamentos:deps,colaboradores:colabs,ausencias:aus,acessos:[],orcamento_versoes:[],orcamento_linhas:[],orcamento_caixa:[],premissas_conta:premissas,impostos_config:impostos,acordos_cartao:acordos,apuracoes:[],empresas,predios,plano_contas:plano,centros_custo:centros,contas_bancarias:bancos,parceiros,lancamentos:lanc,parcelas:parc,perfis,usuarios_empresas:empresas.map(e=>({usuario_id:UID,empresa_id:e.id,papel:'admin'})),produtos:[],importacoes:[]};
+const usuarios=[{...perfis[0],ultimo_acesso:'2026-11-03T10:00:00Z',convite_aceito:true,empresas:empresas.map(e=>e.id),papel:'admin',predios:[]},{usuario_id:id(),email:'ana@exemplo.com',nome:'Ana Souza',master:false,ativo:true,ultimo_acesso:null,convite_aceito:false,empresas:[empresas[0].id],papel:'financeiro',predios:[predios[0].id]},{usuario_id:id(),email:'rita@exemplo.com',nome:'Rita Lopes',master:false,ativo:true,ultimo_acesso:'2026-11-02T10:00:00Z',convite_aceito:true,outras_empresas:1,acessos:[{empresa_id:empresas[0].id,papel:'rh',departamento_id:deps[0].id,predios:[]}],empresas:[empresas[0].id],papel:'rh',predios:[]}];
 // ---------- PostgREST falso
 function filtrar(rows,q){
   for(const [k,v] of q){if(['select','order','limit','offset'].includes(k))continue;const [op,...r]=v.split('.');const val=r.join('.');
-    rows=rows.filter(x=>{const a=x[k];if(op==='eq')return String(a)===val;if(op==='gte')return a!=null&&a>=val;if(op==='lte')return a!=null&&a<=val;if(op==='is')return a==null;if(op==='in')return val.replace(/^\(|\)$/g,'').split(',').map(x=>x.replace(/^"|"$/g,'')).includes(String(a));return true})}
+    rows=rows.filter(x=>{const a=x[k];if(op==='eq')return String(a)===val;if(op==='gte')return a!=null&&a>=val;if(op==='lte')return a!=null&&a<=val;if(op==='lt')return a!=null&&a<val;if(op==='is')return a==null;if(op==='in')return val.replace(/^\(|\)$/g,'').split(',').map(x=>x.replace(/^"|"$/g,'')).includes(String(a));return true})}
   const o=q.get('order');if(o){const [c,d]=o.split('.');rows=rows.slice().sort((x,y)=>String(x[c]).localeCompare(String(y[c]))*(d==='desc'?-1:1))}
   const l=q.get('limit');if(l)rows=rows.slice(0,+l);return rows}
 function embutir(t,rows,sel){if(t==='parcelas'&&/lancamentos\(/.test(sel))return rows.map(p=>{const l=lanc.find(x=>x.id===p.lancamento_id);return {...p,lancamentos:l?{predio_id:l.predio_id,descricao:l.descricao,conta_id:l.conta_id,parceiro_id:l.parceiro_id,centro_custo_id:l.centro_custo_id,competencia:l.competencia}:null}});return rows}
@@ -46,13 +52,14 @@ async function rotear(route){const req=route.request();const u=new URL(req.url()
   if(p==='/auth/v1/logout')return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}});
   if(p==='/functions/v1/usuarios-admin'){const b=req.postDataJSON();log.push('fn:'+b.acao);if(b.acao==='listar')return J({usuarios});if(b.acao==='convidar')return J({ok:true,link:'https://vovomhtwqfnlidqlmycu.supabase.co/auth/v1/verify?token=abc&type=invite'});return J({ok:true})}
   if(p==='/functions/v1/indicadores')return J({selic:{valor:15,data:'05/11/2026'},igpm:{mes:-0.36,acum12:-1.2,data:'01/10/2026'},dolar:{valor:5.38,var:-0.4,data:'03/11/2026'}});
-  if(p==='/rest/v1/rpc/criar_empresa'){const b=req.postDataJSON();const e={id:id(),cnpj:b.p_cnpj,razao_social:b.p_razao_social,nome_fantasia:b.p_nome_fantasia};empresas.push(e);log.push('rpc criar_empresa');return J(e.id)}
+  if(p==='/rest/v1/rpc/criar_empresa'){const b=req.postDataJSON();const e={id:id(),cnpj:b.p_cnpj,razao_social:b.p_razao_social,nome_fantasia:b.p_nome_fantasia,tipo_pessoa:b.p_tipo||'pj',regime_tributario:b.p_regime||null,atividade:b.p_atividade||null,cor:b.p_cor||null,ativa:true};empresas.push(e);novaEmp.push(b);log.push('rpc criar_empresa '+(b.p_tipo||'pj'));return J(e.id)}
+  if(p==='/rest/v1/rpc/transferencias_sem_par')return J(semPar);
   const t=p.replace('/rest/v1/','');const tab=DB[t];if(!tab)return J({message:'tabela '+t},404);
   if(m==='HEAD'){const rows=filtrar(tab,u.searchParams);return route.fulfill({status:200,headers:{'access-control-allow-origin':'*','access-control-expose-headers':'*','content-range':'0-0/'+rows.length}})}
   if(m==='GET'){let rows=filtrar(tab,u.searchParams);rows=embutir(t,rows,u.searchParams.get('select')||'');
     const rg=req.headers()['range'];if(rg){const [a,b]=rg.split('-').map(Number);rows=rows.slice(a,b+1)}
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(rows[0]||null);return J(rows)}
-  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();x.criado_em=x.criado_em||new Date().toISOString();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
+  if(m==='POST'){let b=req.postDataJSON();const arr=Array.isArray(b)?b:[b];arr.forEach(x=>{x.id=x.id||id();if(t==='ausencias'){x.dias=Math.round((new Date(x.fim)-new Date(x.inicio))/864e5)+1;x.empresa_id=colabs.find(c=>c.id===x.colaborador_id)?.empresa_id}x.criado_em=x.criado_em||new Date().toISOString();tab.push(x)});log.push(`insert ${t} ${arr.length}`);
     if((req.headers()['accept']||'').includes('vnd.pgrst.object'))return J(arr[0],201);return J(arr,201)}
   if(m==='PATCH'){const b=req.postDataJSON();filtrar(tab,u.searchParams).forEach(x=>Object.assign(x,b));log.push('update '+t);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
   if(m==='DELETE'){const del=new Set(filtrar(tab,u.searchParams));for(let i=tab.length-1;i>=0;i--)if(del.has(tab[i]))tab.splice(i,1);log.push('delete '+t+' '+del.size);return route.fulfill({status:204,headers:{'access-control-allow-origin':'*'}})}
@@ -79,6 +86,10 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.click(`[data-acao=bol-lancar][data-id="${boletos[0].id}"]`);await pg.waitForTimeout(400);await shot(pg,'boletos-lancar');
     await pg.selectOption('#lConta',{index:8});await pg.click('form[data-form=lanc] button:not([type=button])');await pg.waitForTimeout(900);await shot(pg,'boletos-depois');
     if(boletos[0].status!=='lancado')errs.push('boleto não marcado como lançado');
+    DB.boletos_email_token[0].url_busca='https://script.google.com/macros/s/ABC_1/exec';let buscou=0;
+    await pg.route('https://script.google.com/**',r=>{buscou++;r.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify({ok:true,conversas:30,novos:1})})});
+    await pg.evaluate(()=>{location.hash='contas'});await pg.waitForTimeout(700);await pg.evaluate(()=>{location.hash='boletos'});await pg.waitForTimeout(900);await shot(pg,'boletos-botao');
+    await pg.click('[data-acao=bol-buscar]');await pg.waitForTimeout(900);await shot(pg,'boletos-buscou');if(!buscou)errs.push('botão buscar não chamou o script');
     await pg.evaluate(()=>location.hash='dre');await pg.waitForTimeout(500);await pg.click('[data-abre=dop]');await pg.click('[data-dre=unid]');await shot(pg,'dre-unid');await pg.click('[data-dre=comp]');await shot(pg,'dre-comp');
     await pg.click('#fTipo [data-per=mes]');await shot(pg,'dre-mes');
     await pg.click('[data-dre=mes]');await pg.waitForTimeout(400);
@@ -101,8 +112,71 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     // usuários
     await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(600);await pg.click('[data-acao=convidar]');await pg.waitForTimeout(200);await shot(pg,'convite');
     await pg.fill('#uNome','Bruno');await pg.fill('#uEmail','bruno@exemplo.com');await pg.check(`[data-up="${predios[2].id}"]`);await pg.click('form[data-form=usuario] button:not([type=button])');await pg.waitForTimeout(600);await shot(pg,'link-acesso');
+    // gestão de pessoas
+    await pg.evaluate(()=>location.hash='pessoas');await pg.waitForTimeout(800);await shot(pg,'pessoas');
+    await pg.click('[data-acao=novo-colab]');await pg.waitForTimeout(200);await shot(pg,'colab-form');await pg.fill('#cNome','Joana Teste');await pg.fill('#cCpf','123.456.789-01');await pg.fill('#cSal','3.100,00');await pg.fill('#cAdm','2025-01-02');await pg.click('form[data-form=colab] button:not([type=button])');await pg.waitForTimeout(700);
+    if(!colabs.some(c=>c.nome==='Joana Teste'&&c.salario===3100&&c.cpf==='12345678901'))errs.push('colaborador não gravou');
+    await pg.click('[data-pesfiltro=desligados]');await pg.waitForTimeout(400);await shot(pg,'pessoas-desligados');await pg.click('[data-pesfiltro=ativos]');await pg.waitForTimeout(300);
+    await pg.evaluate(()=>location.hash='ausencias');await pg.waitForTimeout(800);await shot(pg,'ausencias');
+    await pg.click('[data-acao=nova-aus]:not([data-colab])');await pg.waitForTimeout(300);await shot(pg,'aus-form');await pg.fill('#aIni','2026-11-20');await pg.fill('#aFim','2026-11-21');await pg.click('form[data-form=aus] button:not([type=button])');await pg.waitForTimeout(700);
+    if(aus.length!==8)errs.push('ausência não gravou: '+aus.length);
+    await pg.selectOption('#ausMes','5');await pg.waitForTimeout(500);await shot(pg,'ausencias-junho');
+    await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(600);await pg.click(`[data-acao=editar-usuario]`);await pg.waitForTimeout(300);await shot(pg,'usuario-editar');await pg.click('[data-acao=fechar]');
     // empresa nova
-    await pg.evaluate(()=>location.hash='empresas');await pg.waitForTimeout(500);await pg.click('[data-acao=nova-empresa]');await pg.fill('#eCnpj','11.111.111/0001-11');await pg.fill('#eRazao','Teste SA');await pg.click('form[data-form=empresa] button:not([type=button])');await pg.waitForTimeout(800);
+    await pg.evaluate(()=>location.hash='empresas');await pg.waitForTimeout(500);await pg.click('[data-acao=nova-empresa]');await pg.waitForTimeout(300);await shot(pg,'nova-empresa');await pg.fill('#eDoc','11.111.111/0001-11');await pg.fill('#eRazao','Teste SA');await pg.fill('#eFant','Teste');await pg.fill('#eBanco','Itaú');await pg.fill('#eUMail','cliente@teste.com');await pg.click('form[data-form=empresa] button:not([type=button])');await pg.waitForTimeout(1000);await shot(pg,'nova-empresa-link');await pg.click('[data-acao=fechar]').catch(()=>{});
+    if(DB.alcadas.length!==5)errs.push('alçadas do modelo: '+DB.alcadas.length);if(!DB.contas_bancarias.some(b=>b.banco_nome==='Itaú'&&b.banco_codigo==='341'&&b.agencia==='a informar'))errs.push('conta bancária da nova empresa');
+    await pg.click('[data-acao=nova-empresa]');await pg.waitForTimeout(300);await pg.check('input[name=tipo][value=pf]');await pg.waitForTimeout(150);await shot(pg,'nova-empresa-pf');
+    await pg.fill('#eDoc','123.456.789-01');await pg.fill('#eRazao','Maria Teste');await pg.click('form[data-form=empresa] button:not([type=button])');await pg.waitForTimeout(1000);
+    if(novaEmp.at(-1)?.p_tipo!=='pf'||novaEmp.at(-1)?.p_cnpj!=='12345678901')errs.push('pessoa física: '+JSON.stringify(novaEmp.at(-1)));
+    await pg.evaluate(()=>location.hash='empresas');await pg.waitForTimeout(600);await shot(pg,'empresas-nova');
+    await pg.click(`[data-acao=dados-emp][data-emp="${empresas[0].id}"]`);await pg.waitForTimeout(200);await pg.fill('#dFant','Café Serra Matriz');await shot(pg,'dados-emp');await pg.click('form[data-form=dados-emp] button:not([type=button])');await pg.waitForTimeout(600);
+    if(empresas[0].nome_fantasia!=='Café Serra Matriz')errs.push('nome fantasia não salvou');
+    // aprovações
+    DB.pagamento_lotes.push({id:id(),empresa_id:empresas[0].id,numero:3,total:12500,status:'rascunho',criado_por:'x',criado_por_nome:'Ana Souza',criado_em:'2026-11-05T10:00:00Z',data_pagamento:'2026-11-10'});
+    DB.alcadas.push({id:id(),empresa_id:empresas[0].id,processo:'pagamento',valor_a_partir:0,aprovador:'financeiro',outra_pessoa:true,ativo:true});
+    await pg.evaluate(()=>location.hash='aprovacoes');await pg.waitForTimeout(900);await shot(pg,'aprovacoes');
+    await pg.click('[data-apr=aprovar]');await pg.waitForTimeout(700);if(DB.pagamento_lotes[0].status!=='aprovado')errs.push('aprovação do lote');
+    await pg.click('[data-apr=nova]');await pg.waitForTimeout(200);await shot(pg,'alcada-form');await pg.click('[data-acao=fechar]');
+    // administração do sistema
+    pg.on('dialog',d=>d.accept());
+    await pg.evaluate(()=>location.hash='admin');await pg.waitForTimeout(1500);await shot(pg,'admin-saude');
+    await pg.click('[data-admtab=parametros]');await pg.waitForTimeout(600);await pg.fill('#admAviso','Fechamento de outubro até dia 5. Lance todas as notas até lá.');await pg.check('input[name=ativo]');await pg.fill('#admWhats','62999998888');await shot(pg,'admin-param');
+    await pg.click('form[data-form=adm-param] button');await pg.waitForTimeout(1000);
+    if(!DB.app_config.some(r=>r.chave==='app.aviso'&&r.valor.ativo))errs.push('aviso não salvou');
+    if(!await pg.$('#avisoGeral'))errs.push('aviso não aparece na tela');
+    await pg.click('[data-admtab=telas]');await pg.waitForTimeout(500);await pg.uncheck('input[name=ver_salario]');await pg.fill('input[name=rot_contas]','Contas a pagar');await shot(pg,'admin-telas');
+    await pg.click('form[data-form=adm-telas] button');await pg.waitForTimeout(1000);
+    if(!DB.app_config.some(r=>r.chave==='app.telas_ocultas'&&r.valor.includes('salario')))errs.push('telas ocultas não salvaram');
+    if(!(await pg.textContent('#nav')).includes('Contas a pagar'))errs.push('novo nome da tela não apareceu no menu');
+    await pg.click('[data-admtab=dados]');await pg.waitForTimeout(400);await pg.click('[data-acao=adm-verificar]');await pg.waitForTimeout(2000);await shot(pg,'admin-dados');
+    await pg.click('[data-admtab=historico]');await pg.waitForTimeout(500);await shot(pg,'admin-historico');
+    // boletos: tela nova
+    {const tk=DB.boletos_email_token[0];tk.ultima_execucao=new Date(Date.now()-12*6e4).toISOString();tk.ultimo_resumo={versao:3,conversas:42,mensagens:61,novos:2,sem_linha:1,links:1,erros:[]};tk.config={};
+     const e0=empresas[0].id;const pAb=parc.find(x=>x.empresa_id===e0&&x.status==='aberta'&&x.valor<0);
+     parceiros.push({id:id(),empresa_id:e0,documento:'50565317000143',nome:'IPASGO Saúde'});
+     const b1={id:id(),empresa_id:e0,chave:'e',status:'novo',remetente:'IPASGO <boleto@ipasgo.go.gov.br>',assunto:'Boleto novembro',recebido_em:'2026-11-05T09:00:00Z',linha_digitavel:'75691500430144950471912093660012616270000038384',valor:383.84,vencimento:'2026-11-11',beneficiario:'SERV. SOC. AUT. IPASGO SAUDE',documento_beneficiario:'50565317000143',criado_em:'2026-11-05T10:00:00Z'};
+     const b2={...b1,id:id(),chave:'f',linha_digitavel:'75691500430144950471912093800014716270000037973',valor:379.73,assunto:'Boleto dependente'};
+     const b3={id:id(),empresa_id:e0,chave:'g',status:'novo',remetente:'Condomínio <cobranca@condominio.com>',assunto:'Boleto condomínio',recebido_em:'2026-11-06T09:00:00Z',valor:Math.abs(pAb.valor),vencimento:pAb.vencimento,beneficiario:'Condomínio Mar Azul',criado_em:'2026-11-06T10:00:00Z'};
+     const b4={id:id(),empresa_id:e0,chave:'h',status:'novo',remetente:'Loja Y <ofertas@lojay.com>',assunto:'Sua 2ª via de boleto',recebido_em:'2026-11-06T09:00:00Z',link:'https://lojay.com/boleto/9',observacao:'O boleto veio em link. Abra o link para pegar a linha digitável.',criado_em:'2026-11-06T10:00:00Z'};
+     if(!DB.boletos_email_token.some(t=>t.empresa_id===e0))DB.boletos_email_token.push({empresa_id:e0,token:id(),criado_em:'2026-11-06T00:00:00Z',ultimo_uso:null,ultima_execucao:new Date(Date.now()-9*36e5).toISOString(),ultimo_resumo:{versao:2,conversas:40,mensagens:3,novos:0,erros:[]},config:{}});
+     boletos.push(b1,b2,b3,b4);
+     await pg.evaluate(()=>location.hash='contas');await pg.waitForTimeout(600);await pg.evaluate(()=>location.hash='boletos');await pg.waitForTimeout(1500);await shot(pg,'boletos-v2');
+     if(!(await pg.textContent('#view')).includes('Parece já lançado'))errs.push('não avisou boleto já lançado');
+     await pg.check(`[data-bolsel="${b1.id}"]`);await pg.waitForTimeout(500);await pg.check(`[data-bolsel="${b2.id}"]`);await pg.waitForTimeout(500);await shot(pg,'boletos-selecao');
+     await pg.click('[data-acao=bx-lote]');await pg.waitForTimeout(400);await pg.selectOption('#bxConta',{index:8});await shot(pg,'boletos-lote');
+     const nl=lanc.length;await pg.click('form[data-form=bx-lote] button:not([type=button])');await pg.waitForTimeout(1500);
+     if(b1.status!=='lancado'||b2.status!=='lancado'||lanc.length!==nl+2)errs.push('lote de boletos: '+b1.status+' '+b2.status+' '+(lanc.length-nl));
+     if(!lanc.slice(-2).every(l=>l.parceiro_id===parceiros.at(-1).id))errs.push('lote não usou o fornecedor pelo CNPJ');
+     await pg.click(`[data-acao=bx-vincular][data-id="${b3.id}"]`);await pg.waitForTimeout(900);if(b3.status!=='lancado'||b3.lancamento_id!==pAb.lancamento_id)errs.push('vincular ao lançamento existente');
+     await pg.click(`[data-acao=bx-ignorar][data-id="${b4.id}"]`);await pg.waitForTimeout(300);await shot(pg,'boletos-ignorar');await pg.click('[data-acao=bx-ign-sempre]');await pg.waitForTimeout(900);
+     if(b4.status!=='ignorado'||!(DB.boletos_email_token.find(t=>t.empresa_id===e0).config.ignorar_remetentes||[]).includes('ofertas@lojay.com'))errs.push('ignorar remetente sempre');
+     await pg.click('[data-bolf=lancado]');await pg.waitForTimeout(400);await shot(pg,'boletos-lancados');await pg.click('[data-bolf=novo]');await pg.waitForTimeout(300);
+     await pg.click('[data-acao=bol-config]');await pg.waitForTimeout(300);await pg.fill('#bxSempre','ipasgo.go.gov.br');await shot(pg,'boletos-ajustes');await pg.click('form[data-form=bx-config] button:not([type=button])');await pg.waitForTimeout(800);
+     if(!(tk.config.sempre_remetentes||[]).includes('ipasgo.go.gov.br'))errs.push('ajustes da busca não salvaram');await pg.click('[data-acao=fechar]');
+     await pg.click('[data-acao=bx-colar]');await pg.waitForTimeout(300);await pg.fill('#bxLinha','75691.50043 01449.504719 12093.660012 6 16270000038384');await pg.waitForTimeout(200);await shot(pg,'boletos-colar');
+     await pg.click('form[data-form=bx-colar] button:not([type=button])');await pg.waitForTimeout(500);if((await pg.inputValue('#lValor')).replace(/\D/g,'')!=='38384')errs.push('colar linha: valor '+await pg.inputValue('#lValor'));await pg.click('[data-acao=fechar]');}
+    // menu recolhido
+    await pg.click('#btnRecolhe');await pg.waitForTimeout(300);await shot(pg,'menu-recolhido');await pg.click('#btnRecolhe');
     // faturamento
     await pg.evaluate(()=>location.hash='faturamento');await pg.waitForTimeout(900);await shot(pg,'faturamento');
     await pg.click('#fTipo [data-per=ano]');await pg.waitForTimeout(700);await shot(pg,'faturamento-ano');
@@ -157,6 +231,14 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
      const lidas=await pg.evaluate(()=>S.ext.prev&&S.ext.prev.lin.map(l=>l.data+' '+l.valor+' '+l.historico));console.log('EXT PDF',JSON.stringify(lidas));
      if(!lidas||lidas.length!==4)errs.push('PDF Nubank: esperava 4 movimentações');
      await pg.click('[data-acao=ext-gravar]');await pg.waitForTimeout(1200);await shot(pg,'ext-pdf-conc');}
+    // plano de contas e transferências
+    await pg.evaluate(()=>location.hash='plano');await pg.waitForTimeout(700);await pg.selectOption('#planoEmp',empresas[0].id);await pg.waitForTimeout(700);await shot(pg,'plano');
+    {const c=plano.find(x=>x.empresa_id===empresas[0].id&&x.codigo==='5.02.001');await pg.click(`[data-acao=editar-conta][data-id="${c.id}"]`);await pg.waitForTimeout(300);await shot(pg,'conta-editar');await pg.fill('#cCod','5.02.009');await pg.fill('#cNome','Aluguel e condomínio');await pg.click('form[data-form=conta] button:not([type=button])');await pg.waitForTimeout(900);if(c.codigo!=='5.02.009'||c.nome!=='Aluguel e condomínio')errs.push('edição da conta não salvou: '+c.codigo+' '+c.nome)}
+    {const pai=plano.find(x=>x.empresa_id===empresas[0].id&&x.codigo==='5');await pg.click(`[data-acao=nova-subconta][data-id="${pai.id}"]`);await pg.waitForTimeout(300);const cod=await pg.inputValue('#cCod');await pg.fill('#cNome','Plano de saúde IPASGO');await shot(pg,'subconta');await pg.click('form[data-form=conta] button:not([type=button])');await pg.waitForTimeout(900);const nv=plano.find(x=>x.nome==='Plano de saúde IPASGO');console.log('SUBCONTA',cod,nv?.conta_pai===pai.id);if(!nv)errs.push('subconta não criada')}
+    await pg.click('[data-acao=criar-transf]');await pg.waitForTimeout(900);await shot(pg,'plano-transf');console.log('TRANSF CONTAS',plano.filter(x=>/Transfer/.test(x.nome)&&x.empresa_id===empresas[0].id).map(x=>x.codigo+' '+x.nome).join(', '));
+    await pg.evaluate(()=>location.hash='bancos');await pg.waitForTimeout(800);await pg.click('[data-acao=nova-transf]');await pg.waitForTimeout(300);await pg.selectOption('#tEmp',empresas[0].id);await pg.dispatchEvent('#tEmp','change');await pg.fill('#tVal','1.000,00');await shot(pg,'transf');
+    {const n0=lanc.length,p0=parc.length;await pg.click('form[data-form=transf] button:not([type=button])');await pg.waitForTimeout(1200);if(lanc.length!==n0+2||parc.length!==p0+2)errs.push('transferência não gravou 2+2');await shot(pg,'bancos-transf');console.log('TRANSF',JSON.stringify(lanc.slice(-2).map(l=>[l.valor,l.vinculo_id?'vinc':''])))}
+    await pg.evaluate(()=>location.hash='dre');await pg.waitForTimeout(800);if(await pg.evaluate(()=>!!document.querySelector('.chip.warn')&&/sem grupo/.test(document.body.textContent)))console.log('aviso sem grupo presente (pode ser de dado antigo)');
     // importação
     await pg.evaluate(()=>location.hash='importar');await pg.waitForTimeout(600);
     await pg.setInputFiles('#arqImp',{name:'antigos.csv',mimeType:'text/csv',buffer:Buffer.from(['CNPJ Empresa;Prédio;Data Competência;Data Vencimento;Data Pagamento;Conta Contábil;Centro de Custo;Produto/Serviço;Cliente/Fornecedor;CPF/CNPJ Parceiro;Documento;Descrição;Valor;Banco;Agência;Conta Corrente;Forma de Pagamento',
@@ -167,8 +249,18 @@ const srv=http.createServer((q,r)=>{let f=path.join(APP,decodeURIComponent(q.url
     await pg.waitForTimeout(600);await shot(pg,'import-conf');await pg.click('[data-acao=importar]');await pg.waitForTimeout(1500);await shot(pg,'import-feito');
   });
   await rodar({width:390,height:844},'mob',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForSelector('[data-entra]',{timeout:8000});await shot(pg,'m-entrada');await pg.click('[data-entra="*"]');await pg.waitForSelector('.tile',{timeout:8000});await shot(pg,'m-painel');await pg.evaluate(()=>location.hash='boletos');await pg.waitForTimeout(800);await shot(pg,'m-boletos');
-    for(const r of ['dre','usuarios','importar','orcamento','premissas','bancos','auditoria']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}
+    for(const r of ['dre','usuarios','importar','orcamento','premissas','bancos','auditoria','pessoas','ausencias']){await pg.evaluate(r=>location.hash=r,r);await pg.waitForTimeout(700);await shot(pg,'m-'+r)}
     await pg.evaluate(()=>{location.hash='salario'});await pg.waitForTimeout(500);await pg.fill('#salBruto','5900');await pg.press('#salBruto','Enter');await pg.waitForTimeout(700);await shot(pg,'m-salario')});
+  // administrador da empresa: vê Usuários e Pessoas só da própria empresa
+  perfis[0].master=false;empresas.splice(1);DB.lancamentos=lanc.filter(l=>l.empresa_id===empresas[0].id);DB.usuarios_empresas.splice(0,DB.usuarios_empresas.length,{usuario_id:UID,empresa_id:empresas[0].id,papel:'admin'});
+  usuarios.splice(0,usuarios.length,{...perfis[0],acessos:[{empresa_id:empresas[0].id,papel:'admin',departamento_id:deps[0].id,predios:[]}],convite_aceito:true},usuarios[1]);
+  await rodar({width:1366,height:900},'admemp',async pg=>{await pg.fill('#aEmail','evaldoalves561@gmail.com');await pg.fill('#aSenha','x');await pg.click('form[data-form=login] button');await pg.waitForTimeout(1500);const en=await pg.$('[data-entra]');if(en){await en.click();await pg.waitForTimeout(800)}
+    const nav=await pg.$$eval('#nav a',as=>as.map(a=>a.getAttribute('href')));if(!nav.includes('#usuarios')||!nav.includes('#pessoas'))errs.push('admin da empresa sem menu: '+nav.join(','));
+    await pg.evaluate(()=>location.hash='usuarios');await pg.waitForTimeout(800);await shot(pg,'adm-usuarios');
+    if(await pg.$('text=Equipe master'))errs.push('admin da empresa vê a equipe master');
+    await pg.click('[data-acao=convidar]');await pg.waitForTimeout(300);await shot(pg,'adm-convite');
+    const n=await pg.$$eval('[data-ue]',x=>x.length);if(n!==1)errs.push('admin vê '+n+' empresas no convite');
+    await pg.evaluate(()=>location.hash='pessoas');await pg.waitForTimeout(800);await shot(pg,'adm-pessoas')});
   await b.close();srv.close();
   console.log('LOG',log.join(' | '));console.log('ORC',DB.orcamento_versoes.map(v=>v.nome+' '+v.tipo+' trav:'+v.congelada).join('; '),'linhas',DB.orcamento_linhas.length,'caixa',DB.orcamento_caixa.length,'premissa1',JSON.stringify(premissas[0].prazos_dias));console.log('ERROS',errs.length?errs.join('\n'):'nenhum');
   const novos=lanc.filter(l=>l.importacao_id);console.log('importados',novos.length,novos.map(l=>l.valor+' '+l.competencia+' cc:'+(centros.find(c=>c.id===l.centro_custo_id)?.nome)+' parc:'+(parceiros.find(p=>p.id===l.parceiro_id)?.nome)).join(' ; '));
